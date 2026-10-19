@@ -1,4 +1,6 @@
 /target
+*.ipa
+/web/dist
 /vendor/boost
 /touchHLE_sandbox
 /touchHLE_apps

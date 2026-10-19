@@ -1,4 +1,29 @@
-# touchHLE: high-level emulator for early iOS apps
+# touchHLE-web
+
+An independent, browser-focused fork of [touchHLE](https://github.com/touchHLE/touchHLE).
+
+## Goal and current status
+
+Choose an IPA on your device and run supported iPhone OS games entirely in your
+browser. Hosting serves static files only: no server-side emulation, IPA upload,
+or streamed gameplay. Single-game packaging is deferred until this works.
+
+**Browser gameplay is not implemented yet.** The native emulator retains the
+TinkerBox BGRA texture fix and glGetTexParameterfv/iv compatibility fixes.
+The browser port is incremental; an IPA picker is not evidence of emulation.
+
+See [architecture and acceptance gates](dev-docs/browser.md) and
+[fork contribution policy](CONTRIBUTING.md). AI-assisted contributions are
+allowed here, independently of upstream's policy. Existing licenses and
+attribution remain in force. No proprietary games are distributed.
+
+Native build instructions remain in [dev-docs/building.md](dev-docs/building.md).
+This fork retains Rust and the existing HLE implementation rather than rewriting
+working compatibility code in another language.
+
+## Upstream documentation
+
+The following describes upstream/native touchHLE, not completed browser support.
 
 **touchHLE** is a high-level emulator for early iOS apps. It runs on modern desktop operating systems and Android, and is written in Rust.
 
