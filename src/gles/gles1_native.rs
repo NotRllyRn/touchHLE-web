@@ -133,6 +133,12 @@ impl GLES for GLES1Native<'_> {
     unsafe fn GetTexEnvfv(&mut self, target: GLenum, pname: GLenum, params: *mut GLfloat) {
         gles11::GetTexEnvfv(target, pname, params)
     }
+    unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
+        gles11::GetTexParameteriv(target, pname, params)
+    }
+    unsafe fn GetTexParameterfv(&mut self, target: GLenum, pname: GLenum, params: *mut GLfloat) {
+        gles11::GetTexParameterfv(target, pname, params)
+    }
     unsafe fn GetPointerv(&mut self, pname: GLenum, params: *mut *const GLvoid) {
         // The second argument to glGetPointerv must be a mutable pointer,
         // but gl_generator generates the wrong signature by mistake, see

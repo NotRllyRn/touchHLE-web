@@ -795,6 +795,18 @@ impl GLES for GLES1OnGL2<'_> {
         assert_eq!(target, gl21::TEXTURE_ENV);
         gl21::GetTexEnvfv(target, pname, params);
     }
+    unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
+        let (type_, _count) = TEX_PARAMS.get_type_info(pname);
+        assert!(type_ == ParamType::Int);
+        assert_eq!(target, gl21::TEXTURE_2D);
+        gl21::GetTexParameteriv(target, pname, params);
+    }
+    unsafe fn GetTexParameterfv(&mut self, target: GLenum, pname: GLenum, params: *mut GLfloat) {
+        let (type_, _count) = TEX_PARAMS.get_type_info(pname);
+        assert!(type_ == ParamType::Float);
+        assert_eq!(target, gl21::TEXTURE_2D);
+        gl21::GetTexParameterfv(target, pname, params);
+    }
     unsafe fn GetPointerv(&mut self, pname: GLenum, params: *mut *const GLvoid) {
         assert!(ARRAYS
             .iter()
@@ -1561,7 +1573,7 @@ impl GLES for GLES1OnGL2<'_> {
         &mut self,
         target: GLenum,
         level: GLint,
-        internalformat: GLint,
+        mut internalformat: GLint,
         width: GLsizei,
         height: GLsizei,
         border: GLint,
@@ -1571,6 +1583,13 @@ impl GLES for GLES1OnGL2<'_> {
     ) {
         assert!(target == gl21::TEXTURE_2D);
         assert!(level >= 0);
+        // GL_EXT_texture_format_BGRA8888 requires iOS callers to pass BGRA for
+        // both `internalformat` and `format`. Desktop OpenGL 2.1 accepts BGRA
+        // as the source format but requires a base internal format, so retain
+        // the byte ordering and request equivalent RGBA storage.
+        if internalformat as GLenum == gl21::BGRA {
+            internalformat = gl21::RGBA as GLint;
+        }
         assert!(
             internalformat as GLenum == gl21::ALPHA
                 || internalformat as GLenum == gl21::RGB
