@@ -13,6 +13,7 @@ TinkerBox BGRA texture fix and glGetTexParameterfv/iv compatibility fixes.
 The browser port is incremental; an IPA picker is not evidence of emulation.
 
 See [architecture and acceptance gates](dev-docs/browser.md) and
+[setup on another machine](dev-docs/browser-setup.md), plus the
 [fork contribution policy](CONTRIBUTING.md). AI-assisted contributions are
 allowed here, independently of upstream's policy. Existing licenses and
 attribution remain in force. No proprietary games are distributed.
