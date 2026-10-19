@@ -1,6 +1,7 @@
 /target
 *.ipa
 /web/dist
+/web/node_modules
 /vendor/boost
 /touchHLE_sandbox
 /touchHLE_apps

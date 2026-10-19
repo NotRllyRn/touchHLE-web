@@ -68,3 +68,13 @@ control flow, GLES1 completeness, browser memory pressure, dependency licenses.
 - 2026-10-19: preserved native patch as its own commit; git diff --check passed.
 - Browser runtime not yet implemented. Emscripten is not on PATH; installed Rust
   targets include wasm32-unknown-unknown but not wasm32-unknown-emscripten.
+- Fork baseline: source diff SHA-256 matches the original checkout exactly
+  (9df8bcc903fbefe63e0ae85af8209d8b871a5694d1f15d93a575e23be014a10b).
+- Native `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --lib -- --skip test_app`:
+  30 tests passed. `cargo fmt --check` and `git diff --check` passed.
+- CPU spike: pinned Unicorn.js 2.1.4 ARM bundle, nine checks passed in Node WASM
+  and the actual collaborative Chromium browser worker. Includes ARM, Thumb,
+  interworking, VFP, high guest addresses, memory callback, SVC/resume, contexts,
+  unmapped memory fault, and bounded infinite loop. No game execution yet.
+- Browser network inspection during CPU tests showed only local static GETs.
+  See web/README.md for reproduction and dependency distribution constraints.

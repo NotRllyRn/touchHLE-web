@@ -1,0 +1,12 @@
+{
+  "name": "touchhle-web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@alexaltea/unicorn-js": "2.1.4"
+  }
+}
