@@ -2346,3 +2346,21 @@ MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED,
 POINT_PARAMETERS, PRESENT_BUFFERS). Fresh clean game started after all checks;
 `target/jit-sync-helpers-game.log`, screenshots `target/browser-jit-sync-helpers/`.
 No timing or game acceptance claim for this candidate yet.
+
+Synchronous-helper clean game: terms screenshot132 s, menu162 s; training input
+238 s and first Play457 s (screenshot452 s), selection-to-Play219 s. Previous
+partial-cache run224 s and page-map220 s: this single trial does not establish
+a material gain at10 s screenshot sampling. Render logs remain ~3.3 FPS.
+No builds/tests/profiling overlapped the clean interval. Both lessons still being
+verified. Startup/real-time targets remain unmet. Commit f4ae8e6e pushed with
+regression evidence; game timing is not an acceptance claim.
+
+Both synchronous-helper lessons pass: SUCCESS screenshots canvas-532.png and
+canvas-762.png in `target/browser-jit-sync-helpers/`. Lesson2 uses actual touch
+placement (`lesson2-placed.png`) and Play, with no injected guest state. Stopped
+through UI after verification; inspector exit1 is deliberate Stop, not guest
+failure. Retain the exact exclusions for the modest measured CPU gains and
+passing regressions, without claiming a material game speedup. M4/M5 remain open.
+Next: profile compiled dispatch/transition cost and compare an isolated reduction
+before another runtime change. Software GPU limits remain; hardware/mobile,
+input p95, wall-time simulation and three-trial final acceptance are outstanding.

@@ -296,3 +296,9 @@ Narrow synchronous TCI+four float32 helper exclusions yield modest isolated
 memory/FP improvements. Strict Node/Chromium CPU/fibers, JS26, nine graphics
 fixtures twice, Web Audio and formatting pass. Assertions unchanged. Full runtime
 rebuilt; fresh clean game measurement and both lessons pending before retention.
+
+Synchronous-helper f4ae8e6e clean game: menu162 s, training238 to Play457 =219 s,
+~3.3 FPS; no material gain versus224 s at10 s sampling. Both lessons SUCCESS
+532/762 s, actual touch placement verified. Retain after full regressions; stop
+via UI. Next investigate compiled dispatch cost; startup/real-time and device
+acceptance remain open. Source and exact evidence committed/pushed incrementally.
