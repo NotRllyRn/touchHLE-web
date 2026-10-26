@@ -231,6 +231,13 @@
           const fp = this.dispatch.floatMath;
           const operation = callee === null ? -1 : fp?.callees.indexOf(callee) ?? -1;
           if (operation >= 0) {
+            // Pinned ARM rules return the same canonical quiet NaN without
+            // flag changes for this exact pair, in every FPSCR mode.
+            const incoming = new Set(defined);
+            reg(0); constant(0x7fc00000); emit(0x46);
+            reg(2); constant(0x7fc00000); emit(0x46, 0x71, 0x04, 0x40);
+            constant(0x7fc00000); put(0); constant(0); put(1); emit(0x05);
+            defined.clear(); for (const r of incoming) defined.add(r);
             // Binary64 holds a binary32 product exactly (24+24 bits), and an
             // add/sub with exponent gap <=29 (24+29 bits), or a zero operand.
             // These cases can set inexact; wider gaps/division require it sticky.
@@ -278,7 +285,9 @@
               emit(0x72, 0x3a, 0, ...uleb(fp.flags), 0x0b, 0x0b);
             }
             get(21); put(0); constant(0); put(1);
-            emit(0x05); invoke(); emit(0x0b);
+            emit(0x05);
+            defined.clear(); for (const r of incoming) defined.add(r);
+            invoke(); emit(0x0b, 0x0b);
           } else invoke();
         } else if (name === 'exit_tb') {
           save(); get(3); constant(word()); emit(0x36, 2, 0); word();

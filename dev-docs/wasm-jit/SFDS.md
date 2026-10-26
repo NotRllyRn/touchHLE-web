@@ -174,3 +174,19 @@ inputs and strictly above-minimum-normal finite results remain required, with
 exact signed-zero results allowed separately. All exceptional cases use the
 original helper; division keeps its existing sticky-inexact gate. Validate result
 bits and FPSCR across rounding/FZ/DN modes and targeted exponent boundaries.
+
+
+## Canonical quiet-NaN pair
+
+Before finite arithmetic gates, compare both input words with0x7fc00000. If both
+match, return0x000000007fc00000 without reading or modifying floating-point
+status. This is valid for all four pinned ARM helpers and all FPSCR modes.
+Every other pair follows existing finite gates/helper fallback. Test raw signed,
+signaling and different-payload NaN pairs in both operand positions, plus128
+actual ARM operation/mode combinations. Measure clear/sticky add/multiply loops
+and ordinary-path regressions before a fresh game run.
+
+Internal generated if/else branches must restore the incoming definite-assignment
+set before emitting their alternate path. A write in one arm cannot suppress
+an input load required by the other arm. Retain the fallback padding-register
+assertion that exposed this error.

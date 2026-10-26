@@ -45,7 +45,7 @@ int main(void) {
     free(code);
   }
   for (unsigned sticky = 0; sticky < 2; ++sticky)
-  for (unsigned kind = 0; kind < 5; ++kind) for (unsigned trial = 0; trial < 5; ++trial) {
+  for (unsigned kind = 0; kind < 7; ++kind) for (unsigned trial = 0; trial < 5; ++trial) {
     if (sticky && kind == 4) continue;
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xee000a10; code[1] = 0xee001a90; code[2] = 0xeee12a10;
@@ -58,6 +58,7 @@ int main(void) {
     regs[0] = 0x3f800000; regs[1] = kind >= 2 ? 0x3f800000 : 0;
     regs[2] = sticky ? 0x10 : 0; regs[3] = 100000; regs[15] = 0x1000;
     if (kind == 4) { regs[1] = 0xbf800000; regs[2] = 0x10; } // -1, sticky inexact
+    if (kind >= 5) regs[0] = regs[1] = 0x7fc00000;
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -68,8 +69,8 @@ int main(void) {
     } while (result == -1);
     double ms = emscripten_get_now() - start;
     union {float f; uint32_t bits;} value = {.bits = regs[0]};
-    assert(result == 0x42 && value.f == (kind == 2 ? 100001.0f : kind == 1 || kind == 4 ? 0.0f : 1.0f) && regs[1] == (sticky || kind == 4 ? 0x10 : 0));
-    const char *name[] = {"float-add-zero", "float-mul-zero", "float-add-normal", "float-mul-normal", "float-cancel"};
+    assert(result == 0x42 && (kind >= 5 ? value.bits == 0x7fc00000 : value.f == (kind == 2 ? 100001.0f : kind == 1 || kind == 4 ? 0.0f : 1.0f)) && regs[1] == (sticky || kind == 4 ? 0x10 : 0));
+    const char *name[] = {"float-add-zero", "float-mul-zero", "float-add-normal", "float-mul-normal", "float-cancel", "float-mul-nan", "float-add-nan"};
     printf("BENCH {\"kind\":\"%s%s\",\"trial\":%u,\"instructions\":300006,\"ms\":%.3f}\n", name[kind], sticky ? "-sticky" : "", trial, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);

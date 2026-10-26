@@ -346,6 +346,14 @@ void adapter_checks(void) {
       assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
       assert(regs[0] == 0x3f800002 && regs[1] == 0x10);
     }
+    for (unsigned mode = 0; mode < 32; ++mode) {
+      uint32_t fpscr = ((mode & 3) << 22) | ((mode & 4) << 22) |
+                       ((mode & 8) << 22) | (mode & 16 ? 0x9f : 0);
+      regs[0] = regs[1] = 0x7fc00000; regs[2] = fpscr;
+      regs[15] = 0x1000; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+      assert(regs[0] == 0x7fc00000 && regs[1] == fpscr);
+    }
     uint32_t hash = 2166136261u, seed = 0x12345678;
     for (unsigned mode = 0; mode < 32; ++mode) for (unsigned item = 0; item < 512; ++item) {
       seed = seed * 1664525u + 1013904223u;

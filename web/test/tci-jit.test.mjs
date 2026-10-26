@@ -187,32 +187,36 @@ test('guarded float operations retain rounding, flag and special-value fallback'
   const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[-0,-1],[0,-1],[1.1,1.1],
     [2**-100,2**-100],[1,2**-29],[1,2**-30],[1,2**-100],[-0,-0],
     [value(0x00800001),value(0x00800000)],[value(0x00800001),-value(0x00800000)],
-    [Infinity,1],[NaN,1],
+    [Infinity,1],[NaN,1],[NaN,NaN],
     [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(0x00800001),1],
     [value(0x007fffff),1],[value(0x7f7fffff),1],[value(1),1]].map(p=>p.map(bits));
+  // Keep raw NaN payloads: converting through JS numbers can quiet sNaNs.
+  for(const other of [0x7fc00001,0xffc00000,0x7f800001,0,0x7f800000])
+    pairs.push([0x7fc00000,other],[other,0x7fc00000]);
   for(let i=0;i<300;i++)pairs.push([random(),random()]);
   const operations=[(a,b)=>a+b,(a,b)=>a*b,(a,b)=>a-b,(a,b)=>a/b];
   for(let operation=0;operation<4;operation++) {
     let calls=0;
     const f=fixture([...op('call',...imm(900+operation)),...exit()],undefined,
-      {counter:96,clear(){},call(){calls++;return 0x11223344n;},
+      {counter:96,clear(){},call(...args){calls++;assert.equal(args[3],123);return 0x11223344n;},
         floatMath:{callees:[900,901,902,903],rounding:0,flags:1,nearest:0,inexact:32}});
     const status=new Uint8Array(f.memory.buffer,4096,2);
     for(const rounding of [0,1])for(const flags of [0,32,33])for(const [a,b] of pairs) {
       f.regs()[0]=a;f.regs()[1]=123;f.regs()[2]=b;f.regs()[5]=4096;
       status[0]=rounding;status[1]=flags;
-      const expected=bits(operations[operation](value(a),value(b))), magnitude=expected&0x7fffffff;
+      const canonical=a===0x7fc00000&&b===0x7fc00000;
+      const expected=canonical?0x7fc00000:bits(operations[operation](value(a),value(b))), magnitude=expected&0x7fffffff;
       const addSub=operation===0||operation===2;
       const zeroOperand=!(a&0x7fffffff)||!(b&0x7fffffff);
       const exactInputs=operation===1||(addSub&&(zeroOperand||Math.abs(((a>>>23)&255)-((b>>>23)&255))<=29));
       const exactZero=!magnitude&&(addSub||(operation===1&&zeroOperand));
-      const fast=rounding===0&&(exactInputs||(flags&32))&&normalOrZero(a)&&normalOrZero(b)&&
+      const fast=canonical||rounding===0&&(exactInputs||(flags&32))&&normalOrZero(a)&&normalOrZero(b)&&
         ((magnitude>0x00800000&&magnitude<0x7f800000)||exactZero);
       const before=calls;f.run();
       assert.equal(calls-before,fast?0:1);
       assert.equal(f.regs()[0],fast?expected:0x11223344);
       assert.equal(f.regs()[1],0);
-      const inexact=fast&&operation!==3&&operations[operation](value(a),value(b))!==value(expected);
+      const inexact=fast&&!canonical&&operation!==3&&operations[operation](value(a),value(b))!==value(expected);
       assert.deepEqual([...status],[rounding,flags|(inexact?32:0)]);
     }
   }

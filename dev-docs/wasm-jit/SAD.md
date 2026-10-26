@@ -101,8 +101,9 @@ Use nearest-even, normal/zero operands, and a normal finite result strictly
 larger than FLT_MIN, or a separately checked exact signed zero. Binary64 gives
 an exact reference for binary32 multiplication and add/sub with exponent gap
 <=29 or a zero operand, allowing precise inexact-flag updates. Other add/sub
-cases and division require inexact already sticky. All exceptional cases retain
-the original helper. C exports identities, status offsets and enum values;
+cases and division require inexact already sticky. An exact pair of canonical quiet NaNs (both0x7fc00000) returns that same
+bit pattern without changing flags in every FPSCR mode, following the pinned
+ARM helper rules. Other exceptional cases retain the original helper. C exports identities, status offsets and enum values;
 core Wasm arithmetic needs no new ARM decoder or browser extension.
 The pinned interpreter supplies result/FPSCR fingerprints across rounding,
 FZ/DN, sticky flags, edge values and seeded inputs, including division.

@@ -2602,3 +2602,64 @@ canonical quiet NaNs return that same value without raising invalid, independent
 of rounding/default-NaN modes; other payloads/signaling cases require the helper.
 Next implement and measure only this exact observed pair, with all FPSCR modes
 and flags validated before retention. No NaN shortcut is currently committed.
+
+
+Canonical quiet-NaN candidate: specialize only two exact0x7fc00000 operands
+for the four known ARM float32 arithmetic helpers; preserve FPSCR unchanged.
+All other NaN payloads/signaling cases retain helpers. Actual ARM fixture adds
+128 operation/mode checks (four operations,32 rounding/FZ/DN/sticky combinations).
+Benchmark adds canonical add/multiply loops with clear and sticky flags.
+
+Initial JS regression failed: helper fallback observed r1=0 instead of incoming
+123. Definite-assignment tracking incorrectly carried a fast-branch write into
+its alternate helper branch. Restore incoming definitions before each alternate
+branch; retained assertion now passes along with all28 JS tests. This fixes
+fallback ABI preservation even though these VFP helpers ignore that padding
+argument. Logs target/jit-canonical-nan-{js,fixed-js}.log. cargo fmt --check and
+git diff --check pass. Corrected actual CPU/browser checks and isolated benchmark
+comparison are pending; no game performance improvement claimed yet.
+
+
+Corrected canonical-NaN compiler passes Node and Chromium shared CPU/ARM/Thumb/
+VFP/FPSCR, cache invalidation and fiber regressions. Logs
+`target/jit-canonical-nan-fixed-{build,node,browser}.log`. JS28 including explicit
+raw signaling/signed/different-payload NaN pairs pass. Isolated same-Wasm
+new/old/new benchmark medians (five trials each; milliseconds): canonical
+multiply3.861/15.027/3.518; add3.893/19.403/3.647; sticky multiply3.494/14.794/2.934;
+sticky add2.979/19.494/2.871. Finite paths incur guard overhead: clear add-normal
+5.721/5.402/5.712, multiply-normal5.760/4.930/5.251; clear add-zero6.675/5.550/7.060.
+Linked blocks107.818/108.342/108.033 and SVC118.688/117.940/117.744 remain similar.
+Corpus165723/163448/165723 bytes (+1.4%),134 modules, zero failures each.
+`target/jit-canonical-nan-{benchmark,comparison}.log`. A first reporting script
+failed on benchmark rows without a kind field; corrected parser uses default.
+The benchmark itself passed. Retention depends on the measured game tradeoff;
+finite arithmetic slows modestly while the observed loading NaN path is4–6x faster.
+
+Static web build and all nine forced-JIT graphics fixtures each pass twice
+(MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED,
+POINT_PARAMETERS, PRESENT_BUFFERS). Logs target/jit-canonical-nan-*.log.
+Fresh clean TinkerBox run is underway, with no overlapping build/test/profile.
+
+
+Canonical-NaN clean TinkerBox result (uncommitted candidate on30e4284c): menu
+visible152 s versus162 s prior (one screenshot interval). Training input215 s
+to Play388 s =173 s, versus204 s previous (~15% less in one comparison; not
+three-trial acceptance). Driver matched Play at canvas-382.png. First60 s after
+Play:49 FPS log samples, median3.19, range1.87–3.48; these are runtime FPS logs,
+not frame-time percentiles or simulation-speed verification. Both lessons
+SUCCESS: canvas-442.png and canvas-713.png under target/browser-jit-canonical-nan/.
+Actual touch placement confirmed in lesson2-placed.png. Pinch accepted normally.
+No competing build/test/profile through either lesson. Diagnostic profiling
+started only afterward and its later timestamps are not performance acceptance.
+Logs target/jit-canonical-nan-{game,driver}.log. Retain the measured loading gain
+with finite-path overhead explicitly recorded. Ten-second/30 FPS targets remain
+unmet; hardware GPU, Firefox/WebKit and physical mobile validation remain open.
+
+Post-lesson diagnostic15 s sample (13476 samples) now shows generated Wasm4119,
+TCI dispatcher1501, CPU1266, JS compile924, lookup633, Module543 and Rust
+GuestMemory::slice_mut477; soft-float no longer appears in the top30.
+This is a different phase, not a controlled before/after profile. Inspect
+HLE byte-at-a-time memory operations and compilation/dispatch next.
+Artifacts target/jit-canonical-nan-after-lessons-profile/{summary.json,
+worker.cpuprofile,page.png}. Game deliberately stopped via #stop; inspector
+exit1 follows that stop, not a guest crash. No game process remains.

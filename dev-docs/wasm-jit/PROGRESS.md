@@ -350,3 +350,17 @@ quiet NaNs returning7fc00000 (~62% of sampled helper calls). Diagnostic ends
 normally. Pinned ARM rules support a narrow exact-pair shortcut; implement/test
 that next while retaining every other NaN/helper case. Original targets remain
 unmet; source/evidence pushed incrementally.
+
+
+Canonical quiet-NaN candidate passes JS28, actual Node/Chromium CPU/FPSCR/cache/
+fibers and nine graphics fixtures twice. Test exposed and fixed alternate-branch
+incoming-register tracking. Exact-pair NaN loops4–6x faster; finite loops incur
+some guard overhead, corpus+1.4%. Clean game measurement underway to determine
+retention. M4/M5 remain open; no new game performance claim yet.
+
+
+Canonical-NaN clean game: menu152 s; training215 to Play388 =173 s vs204 s prior
+(~15% less, single comparison). Both lessons SUCCESS442/713 s; actual touch
+placement and zoom verified. First60 s after Play: median logged FPS3.19
+(49 samples,1.87–3.48). Retain loading improvement; real-time target remains
+unmet. Profile updated runtime after lessons, then choose next measured bottleneck.
