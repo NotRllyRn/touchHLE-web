@@ -129,3 +129,10 @@ the unchanged helper with original operands. This conservatively excludes
 NaNs, infinities, denormals, tiny results, overflow, alternate rounding and
 flag-sensitive cases. The fast path returns zero-extended float bits and changes
 no status flags. No relaxed SIMD, fast-math or arithmetic fusion is introduced.
+
+Doubleword stores combine low/high TCI words and retain translated-page checks.
+C-exported MO_UNALN permits four-byte-aligned doublewords when their requested
+alignment allows it. Stores crossing4 KiB pages retain helpers; reads cannot
+cross their host mapping. Missing metadata preserves legacy natural alignment.
+Tests cover strict/relaxed alignment, memory growth, endpoint/cross-region faults,
+NaN payloads and stores replacing previously translated instructions.

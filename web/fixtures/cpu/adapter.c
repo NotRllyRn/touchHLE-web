@@ -212,7 +212,8 @@ void adapter_checks(void) {
   code[2] = 0xef000042;
   touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
   for (unsigned trial = 0; trial < 64; ++trial) {
-    unsigned offset = trial & 1 ? 2046 : 1536;
+    const unsigned offsets[] = {1536,1537,2046,1023};
+    unsigned offset = offsets[trial % 4];
     code[offset] = 0x89abcdef; code[offset+1] = 0xfff81234;
     regs[2] = 0x1000 + offset * 4; regs[15] = 0x1000; ticks = 100;
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
@@ -229,7 +230,8 @@ void adapter_checks(void) {
   code[1] = 0xed820b00; // vstr d0,[r2]
   code[2] = 0xef000042;
   for (unsigned trial = 0; trial < 64; ++trial) {
-    unsigned offset = trial & 1 ? 2046 : 1536;
+    const unsigned offsets[] = {1536,1537,2046,1023};
+    unsigned offset = offsets[trial % 4];
     store_regs[0] = 0x89abcdef; store_regs[1] = 0xfff81234;
     store_regs[2] = 0x1000 + offset * 4; store_regs[15] = 0x1000; ticks = 100;
     assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == 0x42);

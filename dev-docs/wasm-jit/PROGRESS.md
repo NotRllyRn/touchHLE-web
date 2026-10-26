@@ -239,3 +239,18 @@ Chromium CPU/fibers and all nine HLE graphics fixtures twice pass. New ARM tests
 verify bit preservation, endpoint/fault PC and executable-page invalidation.
 Paired doubleword-store4.740/46.932/4.820 ms; retain. Fresh game timing/two-lesson
 validation still required; M4/M5 and goal remain open.
+
+Aligned-store clean trial: menu182 s; training input275 s to Play508 s =233 s,
+~3 FPS. No material gain versus230 s, allowing10 s screenshot resolution. Both
+lesson checks pending. Next experiment covers permitted word-aligned doubles,
+using C-exported MO_UNALN and excluding page-crossing stores; JS24 pass so far.
+
+Aligned-store Lesson1 SUCCESS612 s and Lesson2 SUCCESS824 s verified. New
+word-aligned path passes actual Node/Chromium CPU/fibers and full rebuild.
+Paired load4.596/30.305/4.603 ms, store5.208/307.376/5.143 ms; ordinary cases
+broadly stable. Graphics matrix pending. Further sampled word-load fallbacks
+come from existing libgcc/libstdc++ mappings omitted by the two-region cache;
+consider bounded mapping lookup next. Under10 s/real-time targets remain open.
+
+Word-aligned full static build and nine graphics fixtures twice pass; formatting/
+diff pass. Retain pending fresh game measurements and two-lesson validation.

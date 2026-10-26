@@ -256,6 +256,10 @@
           const store = name.startsWith('qemu_st'), wide = name.endsWith('i64');
           const value = byte(), high = wide ? byte() : null, address = byte(), oi = word(), memop = oi >>> 4;
           const alignment = (memop >>> 4) & 7, width = memop & 3, bytes = 1 << width;
+          // A32 doubles are often only word-aligned. Use C's alignment enum;
+          // older runtime artifacts retain the naturally aligned path.
+          const wordAligned = wide && this.dispatch.unaligned !== undefined &&
+            (alignment === (this.dispatch.unaligned >>> 4) || alignment === 1 || alignment === 2);
           const inputs = store ? (wide ? [value, high, address] : [value, address]) : [address], outputs = store ? [] : wide ? [value, high] : [value];
           // Pinned TCGMemOpIdx: low 4 bits are the MMU index; width is log2(size).
           // Alignment 7 means natural alignment (or unaligned on strict hosts).
@@ -266,10 +270,12 @@
             get(0); emit(0x28, 2, ...uleb(engine));
             reg(address); constant(31); emit(0x76); constant(2); emit(0x74, 0x6a); set(21);
             reg(address); get(21); emit(0x28, 2, ...uleb(base), 0x6b); set(22);
-            reg(address); constant(bytes - 1); emit(0x71, 0x45);
+            reg(address); constant(wordAligned ? 3 : bytes - 1); emit(0x71, 0x45);
             get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x4f, 0x71);
             get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x6b, 0x4d, 0x71);
             if (store) {
+              // Keep relaxed doubleword stores within one checked code page.
+              if (wordAligned) { reg(address); constant(4095); emit(0x71); constant(4088); emit(0x4d, 0x71); }
               get(0); emit(0x28, 2, ...uleb(engine));
               reg(address); constant(15); emit(0x76, 0x6a, 0x2d, 0, ...uleb(codePages));
               constant(1); reg(address); constant(12); emit(0x76); constant(7); emit(0x71, 0x74, 0x71, 0x45, 0x71);

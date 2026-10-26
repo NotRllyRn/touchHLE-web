@@ -106,6 +106,7 @@ without changing floating-point semantics or requiring a new ARM decoder.
 The pinned interpreter supplies result/FPSCR fingerprints across rounding,
 FZ/DN, sticky flags, edge values and seeded inputs, including division.
 
-Aligned doubleword stores share the direct-memory mapping and code-page gate.
-Their eight-byte alignment prevents page-straddling writes; unsupported or
-misaligned accesses retain the helper, including original exception semantics.
+Doubleword stores share the direct-memory mapping and code-page gate.
+C-exported alignment metadata also permits word-aligned doubles; a separate
+page-boundary check keeps those stores inside one checked code page. Other
+accesses retain the helper, including original exception semantics.

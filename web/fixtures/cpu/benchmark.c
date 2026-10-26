@@ -71,15 +71,16 @@ int main(void) {
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
+  for (unsigned word_aligned = 0; word_aligned < 2; ++word_aligned)
   for (unsigned trial = 0; trial < 5; ++trial) {
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xed920b00; // vldr d0,[r2]
     code[1] = 0xe2511001; code[2] = 0x1afffffc; // subs; bne start
     code[3] = 0xec530b10; code[4] = 0xef000042; // vmov r0,r3,d0; svc
-    code[1536] = 0x89abcdef; code[1537] = 0xfff81234;
+    code[1536+word_aligned] = 0x89abcdef; code[1537+word_aligned] = 0xfff81234;
     Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
     uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
-    regs[1] = 100000; regs[2] = 0x2800; regs[15] = 0x1000;
+    regs[1] = 100000; regs[2] = 0x2800 + 4 * word_aligned; regs[15] = 0x1000;
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -90,10 +91,11 @@ int main(void) {
     } while (result == -1);
     double ms = emscripten_get_now() - start;
     assert(result == 0x42 && regs[0] == 0x89abcdef && regs[3] == 0xfff81234 && regs[1] == 0);
-    printf("BENCH {\"kind\":\"doubleword\",\"trial\":%u,\"instructions\":300002,\"ms\":%.3f}\n", trial, ms);
+    printf("BENCH {\"kind\":\"doubleword%s\",\"trial\":%u,\"instructions\":300002,\"ms\":%.3f}\n", word_aligned ? "-word-aligned" : "", trial, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
+  for (unsigned word_aligned = 0; word_aligned < 2; ++word_aligned)
   for (unsigned trial = 0; trial < 5; ++trial) {
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xec430b10; // vmov d0,r0,r3
@@ -103,7 +105,7 @@ int main(void) {
     Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
     uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
     regs[0] = 0x89abcdef; regs[3] = 0xfff81234;
-    regs[1] = 100000; regs[2] = 0x2800; regs[15] = 0x1000;
+    regs[1] = 100000; regs[2] = 0x2800 + 4 * word_aligned; regs[15] = 0x1000;
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -113,8 +115,8 @@ int main(void) {
       result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
     } while (result == -1);
     double ms = emscripten_get_now() - start;
-    assert(result == 0x42 && code[1536] == 0x89abcdef && code[1537] == 0xfff81234 && regs[1] == 0);
-    printf("BENCH {\"kind\":\"doubleword-store\",\"trial\":%u,\"instructions\":300002,\"ms\":%.3f}\n", trial, ms);
+    assert(result == 0x42 && code[1536+word_aligned] == 0x89abcdef && code[1537+word_aligned] == 0xfff81234 && regs[1] == 0);
+    printf("BENCH {\"kind\":\"doubleword-store%s\",\"trial\":%u,\"instructions\":300002,\"ms\":%.3f}\n", word_aligned ? "-word-aligned" : "", trial, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }

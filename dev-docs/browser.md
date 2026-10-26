@@ -2096,3 +2096,65 @@ Retain the measured targeted gain; full-game timing/correctness on this final
 compiler remains pending. Logs `target/jit-wide-store-{js,build,node,browser,
 comparison,web-build,hle}.log` and `jit-wide-store-<GRAPHICS_FIXTURE>.log`.
 The benchmark-build log overlaps the diagnostic game; its timings are not used.
+
+Aligned-store clean game trial onac52e3f0: terms match152 s, menu182 s, training
+match272 s/input275 s, Play match502 s/input508 s. Selection-to-Play input233 s,
+with10 s screenshot sampling; playable scene already visible492 s. Roughly3 FPS.
+No build/test/profile overlapped this interval (source-only edits were prepared).
+This shows no material load-time improvement versus the prior230 s trial despite
+the synthetic store gain. Correctness and diagnostic sampling continue after508 s.
+`target/jit-wide-store-{game,driver}.log`; screenshots `target/browser-jit-wide-store/`.
+
+Aligned-store build Lesson1 SUCCESS verified612 s and Lesson2 SUCCESS824 s;
+pinch and real touch drag/placement verified. Later profiling/builds perturb
+these times; they establish correctness only. Inspector stopped via Stop after
+build completion and diagnostics. `target/browser-jit-wide-store/canvas-{612,824}.png`.
+
+### Permitted word-aligned doublewords (2026-10-26)
+
+After clean Play, helper sampling observed247334 fallbacks/15.391 s:124146 word
+loads,61426 doubleword stores,61762 doubleword loads. All61426 stores have
+MO_LEQ/no requested alignment and address remainder4 modulo8. A later sample
+confirmed the same store alignment. `target/jit-wide-store-memory-fallbacks.log`.
+
+The compiler now accepts four-byte-aligned doublewords when C-exported MO_UNALN
+or explicit2/4-byte alignment permits them. Older runtime artifacts without the
+metadata retain the natural-alignment path. Doubleword stores must additionally
+fit inside one4 KiB page, preserving the single-page code bitmap check; crossing
+stores and all stricter alignment requirements retain the original helper.
+Reads remain bounded by their complete host mapping. C exports its enum rather
+than assuming TARGET_ALIGNED_ONLY or host alignment policy.
+
+JS24, rebuilt actual Node/Chromium CPU/fibers pass. Unit coverage includes both
+possible MO_UNALN encodings, legacy missing metadata, strict natural alignment,
+mapping boundaries and both-mapped-page store fallback. ARM VFP load/store tests
+now include address remainder4 and accesses crossing two mapped pages, alongside
+unmapped-boundary faults, payload preservation and executable-page invalidation.
+Eight-patch reverse/reapply byte comparison and repeated patch application pass;
+the existing budget-patch EOF blank-line warning remains. Full runtime rebuild
+passes with existing warnings. No native CPU path is changed.
+
+Same-binary enabled/disabled/enabled five-trial medians without concurrent game/
+build/test (ms): word-aligned doubleword-load4.596/30.305/4.603; word-aligned
+store5.208/307.376/5.143. Naturally aligned load4.778/5.376/4.686; naturally
+aligned store5.719/4.808/4.853; word-memory51.632/50.615/51.918;
+data-memory6.390/5.929/5.844; SVC104.469/106.059/104.111.
+Initial-case warmup variation remains (clear zero-add31.299/23.617/21.838);
+no game speedup claim yet. Logs `target/jit-word-aligned-{js,build,node,browser,
+runtime-build,comparison}.log`. Benchmark-build log overlaps game/runtime build
+and is not performance evidence. Full graphics validation is in progress.
+
+Further sampling identifies why aligned word loads still fall back: addresses
+in libgcc (0x30000000 slide) and libstdc++ (0x3748a000 slide) lie outside the
+cached low-RAM region0x1000+0x0ffff000. The adapter currently caches only the
+largest immutable mapping in each address-space half. Probe logs
+`target/jit-wide-store-{word-read-fallbacks,read-addresses}.log` (diagnostic only).
+These are existing loaded library mappings, not missing guest RAM. Next design
+candidate: bounded direct lookup covering all opted-in immutable mappings,
+preserving unmapped/cross-region faults and translated-code-page invalidation.
+Do not expand or coalesce guest mappings just to bypass checks.
+
+Word-aligned full static build and all nine forced-JIT graphics fixtures each
+pass twice (`target/jit-word-aligned-<GRAPHICS_FIXTURE>.log`). Formatting/diff
+checks pass. Retain the alignment extension; fresh game performance and both
+lessons on this final compiler remain next. No acceptance target is closed.

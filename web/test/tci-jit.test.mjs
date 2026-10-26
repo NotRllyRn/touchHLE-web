@@ -220,6 +220,7 @@ test('inline fixed-region reads preserve bounds, fallback, engine identity and m
 });
 
 test('inline doubleword reads preserve both halves, bounds and fallback', () => {
+  for (const unaligned of [undefined, 0, 0x70])
   for (const memop of [3, 0x13, 0x23, 0x33, 0x73, 0x43, 11, 2, 6]) {
     let calls = 0;
     const f = fixture([...op('qemu_ld_i64', 0, 1, 0, ...word(memop << 4)), ...exit()],
@@ -228,7 +229,7 @@ test('inline doubleword reads preserve both halves, bounds and fallback', () => 
         const r = new Uint32Array(f.memory.buffer, regs, 16);
         r[0] = 0x11223344; r[1] = 0x89abcdef;
         return 0;
-      }, {counter:96,clear(){},readLayout:[0,0,8,16]});
+      }, {counter:96,clear(){},readLayout:[0,0,8,16],unaligned});
     const view = () => new DataView(f.memory.buffer);
     view().setUint32(0,4096,true);
     const expected = 0xffeeddccbbaa9988n;
@@ -241,10 +242,12 @@ test('inline doubleword reads preserve both halves, bounds and fallback', () => 
         view().setBigUint64(8192,expected,true); view().setBigUint64(8200,expected,true);
         f.regs()[0] = (base+offset) >>> 0;
         const previous = calls; f.run();
-        const fast = [3,0x13,0x23,0x33,0x73].includes(memop) && size === 16 && [0,8].includes(offset);
+        const relaxed = unaligned !== undefined && [unaligned >>> 4,1,2].includes(memop >>> 4);
+        const fast = [3,0x13,0x23,0x33,0x73].includes(memop) && size === 16 &&
+          ([0,8].includes(offset) || (relaxed && offset === 4));
         assert.equal(calls-previous,fast ? 0 : 1);
-        assert.equal(f.regs()[0],fast ? 0xbbaa9988 : 0x11223344);
-        assert.equal(f.regs()[1],fast ? 0xffeeddcc : 0x89abcdef);
+        assert.equal(f.regs()[0],fast ? view().getUint32(8192+offset,true) : 0x11223344);
+        assert.equal(f.regs()[1],fast ? view().getUint32(8196+offset,true) : 0x89abcdef);
       }
       f.memory.grow(1);
     }
@@ -283,11 +286,12 @@ test('inline stores recheck translated pages and retain helper fallback', () => 
 });
 
 test('inline doubleword stores recheck translated pages and retain helper fallback', () => {
-  for (const memop of [3, 0x73, 0x43, 11]) {
+  for (const unaligned of [undefined, 0, 0x70])
+  for (const memop of [3, 0x13, 0x23, 0x33, 0x73, 0x43, 11]) {
     let calls = 0;
     const f = fixture([...op('qemu_st_i64', 1, 2, 0, ...word(memop << 4)), ...exit()],
       (_env, regs) => { calls++; assert.equal(new Uint32Array(f.memory.buffer, regs, 16)[1], 0x89abcdef); assert.equal(new Uint32Array(f.memory.buffer, regs, 16)[2], 0xfff81234); return 0; },
-      { counter: 96, clear() {}, readLayout: [0, 0, 8, 16, 32768] });
+      { counter: 96, clear() {}, readLayout: [0, 0, 8, 16, 32768], unaligned });
     const view = () => new DataView(f.memory.buffer);
     view().setUint32(0, 4096, true);
     for (const base of [0x1000, 0xfffff000]) {
@@ -298,16 +302,24 @@ test('inline doubleword stores recheck translated pages and retain helper fallba
       const flag = 4096 + 32768 + (base >>> 15), bit = 1 << ((base >>> 12) & 7);
       for (const translated of [false, true, true]) {
         view().setUint8(flag, translated ? bit : 0);
-        for (const offset of [0, 4088, 1, 4096, -4]) {
+        for (const offset of [0, 4088, 4, 4092, 1, 4096, -4]) {
           const address = (base + offset) >>> 0;
-          view().setBigUint64(8192 + (offset === 4088 ? 4088 : 0), 0n, true);
+          new Uint8Array(f.memory.buffer,8192,8192).fill(0);
           f.regs()[0] = address; f.regs()[1] = 0x89abcdef; f.regs()[2] = 0xfff81234;
           const previous = calls; f.run();
-          const fast = [3, 0x73].includes(memop) && !translated && [0, 4088].includes(offset);
+          const relaxed = unaligned !== undefined && [unaligned >>> 4,1,2].includes(memop >>> 4);
+          const fast = [3,0x13,0x23,0x33,0x73].includes(memop) && !translated &&
+            ([0,4088].includes(offset) || (relaxed && offset === 4));
           assert.equal(calls - previous, fast ? 0 : 1);
-          if ([0, 4088].includes(offset)) assert.equal(view().getBigUint64(8192 + offset, true), fast ? 0xfff8123489abcdefn : 0n);
+          if ([0, 4, 4088, 4092].includes(offset)) assert.equal(view().getBigUint64(8192 + offset, true), fast ? 0xfff8123489abcdefn : 0n);
         }
         f.memory.grow(1);
+      }
+      if (base === 0x1000) {
+        // Both pages mapped, first not translated: crossing still uses helper.
+        view().setUint32(4104,8192,true); view().setUint8(flag,0);
+        f.regs()[0]=base+4092;
+        const previous=calls; f.run(); assert.equal(calls,previous+1);
       }
     }
   }
