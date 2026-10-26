@@ -364,3 +364,19 @@ Canonical-NaN clean game: menu152 s; training215 to Play388 =173 s vs204 s prior
 placement and zoom verified. First60 s after Play: median logged FPS3.19
 (49 samples,1.87–3.48). Retain loading improvement; real-time target remains
 unmet. Profile updated runtime after lessons, then choose next measured bottleneck.
+
+
+0b5d3938 canonical-NaN optimization and game evidence committed/pushed. Next
+profile identifies byte-at-a-time narrow memset mapping lookups. Page-bounded
+fill candidate implemented; enhanced original ARM fixture passes previous runtime,
+native33 tests pass. Updated runtime regression/build and isolated100 MiB fill
+benchmark pending. Goal and M4/M5 remain active.
+
+
+Chunked narrow memset passes native33 tests, actual native/Chromium ARM fill
+regressions and all nine graphics fixtures twice.100 MiB guest-timed benchmark
+new/old/new medians78/9158/74.001 ms (five trials each). Clean game menu152 s,
+training229 to Play397 =168 s vs173 s prior (below timing precision). Logged
+FPS median3.25 over first60 s; both lessons SUCCESS463/723 s, zoom/placement
+verified. Retain cheap measured HLE improvement; next investigate remaining
+CPU dispatch/generated-code/compilation cost. M4/M5 and thread goal stay open.

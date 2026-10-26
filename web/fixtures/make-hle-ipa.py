@@ -679,6 +679,57 @@ if present:
     call_symbol('glGetError')
     require(0, 0)
 
+if not graphics:
+    # Empty fills must not translate a null pointer, including checked memset.
+    for symbol in ['memset', '__memset_chk']:
+        instructions.extend([0xe3a00000, 0xe3a010ff, 0xe3a02000, 0xe3a03000])
+        call_symbol(symbol)
+        require(0, 0)
+    literal(0, 8194)
+    call_symbol('malloc')
+    instructions.append(0xe1a04000) # r4 = allocation
+    literal(1, 0x15a) # conversion to unsigned char
+    literal(2, 8194)
+    call_symbol('memset')
+    instructions.append(0xe1500004) # cmp return pointer,r4
+    instructions.append(0x13a00000) # movne r0,#0
+    instructions.append(0x03a00001) # moveq r0,#1
+    require(0, 1)
+    instructions.extend([0xe2840001, 0xe3a010a5]) # unaligned interior
+    literal(2, 8192)
+    literal(3, 8192)
+    call_symbol('__memset_chk')
+    for offset, expected in [(0, 0x5a), (1, 0xa5), (4095, 0xa5),
+                             (4096, 0xa5), (8192, 0xa5), (8193, 0x5a)]:
+        literal(1, offset)
+        instructions.append(0xe7d40001) # ldrb r0,[r4,r1]
+        require(0, expected)
+    instructions.append(0xe1a00004)
+    call_symbol('free')
+
+if '--memset-bench' in sys.argv:
+    literal(0, 1048576)
+    call_symbol('malloc')
+    instructions.append(0xe1a04000)
+    for marker in ['MEMSET_START', 'MEMSET_END']:
+        literal(0, 0x2f00)
+        instructions.append(0xe3a01000)
+        call_symbol('gettimeofday')
+        literal(0, string(marker + ' %u %u\n'))
+        literal(3, 0x2f00)
+        instructions.extend([0xe5931000, 0xe5932004])
+        call_symbol('printf')
+        if marker == 'MEMSET_START':
+            literal(5, 100)
+            loop=len(instructions)
+            instructions.extend([0xe1a00004, 0xe3a010a5])
+            literal(2, 1048576)
+            call_symbol('memset')
+            instructions.append(0xe2555001)
+            instructions.append(0x1a000000 | ((loop-len(instructions)-2)&0xffffff))
+    instructions.append(0xe1a00004)
+    call_symbol('free')
+
 instructions.extend([0xe3a00000, 0xe3a01000, 0xe3a02000]) # r0=r1=r2=0
 call(0x2008) # memcpy(NULL, NULL, 0)
 literal(0, 0x1c00)
@@ -755,6 +806,8 @@ binary = bytes(text) + bytes(pointer_size) + symbols + strings + words(*range(le
 manifest = dict(CFBundleExecutable='BrowserTest', CFBundleIdentifier='org.touchhle.browser-test',
                 CFBundleName='Browser HLE Test', CFBundleVersion='1.0', MinimumOSVersion='2.0')
 fixture = 'mipmap' if mipmap else 'light-spot' if light_spot else 'light-attenuation' if light_attenuation else 'mapped' if mapped else 'fog' if fog else 'lighting' if lighting else 'point-parameters' if point_parameters else 'points' if points else 'combine' if combine else 'present-buffers' if present_buffers else 'present' if present else 'buffers' if buffers else 'graphics' if graphics else 'hle'
+if '--memset-bench' in sys.argv:
+    fixture = 'memset-bench'
 output = pathlib.Path(__file__).resolve().parents[2] / f'target/browser-{fixture}-test.ipa'
 output.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

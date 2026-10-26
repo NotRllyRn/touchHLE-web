@@ -190,3 +190,14 @@ Internal generated if/else branches must restore the incoming definite-assignmen
 set before emitting their alternate path. A write in one arm cannot suppress
 an input load required by the other arm. Retain the fallback padding-register
 assertion that exposed this error.
+
+
+## Measured HLE byte fill
+
+Narrow memset uses slice.fill in chunks ending at guest4 KiB page boundaries.
+This reduces repeated guest-map lookup while preserving separately allocated
+browser mappings. Skip memory access for count=0, truncate the fill argument
+to u8, return the original destination, and reject checked-buffer overflow
+before writing. Native uses the same bounded algorithm; wide memset is unchanged.
+Validate an original ARM guest against old/new implementations, native tests,
+page-crossing sentinels and guest-timed fill throughput before game measurements.

@@ -2663,3 +2663,55 @@ HLE byte-at-a-time memory operations and compilation/dispatch next.
 Artifacts target/jit-canonical-nan-after-lessons-profile/{summary.json,
 worker.cpuprofile,page.png}. Game deliberately stopped via #stop; inspector
 exit1 follows that stop, not a guest crash. No game process remains.
+
+
+Next measured candidate: profile parent stacks attribute419/477 slice_mut
+samples to GenericChar<u8>::memset. Replace byte-at-a-time narrow memset with
+page-bounded slice.fill, preserving count=0 (including NULL), unsigned-byte
+conversion, return pointer and checked destination size. Page chunks preserve
+valid adjacent guest mappings without requiring contiguous host storage. Wide
+character routines remain unchanged. No new dependencies.
+
+Original ARM HLE fixture now checks empty NULL regular/checked fills, return
+pointer, byte truncation, unaligned multi-page fill and untouched sentinels.
+It passes twice against previous runtime; native unit suite33/33 and formatting
+pass. Logs target/jit-memset-{baseline-browser,native-tests}.log. Browser runtime
+rebuild/new regressions pending. Local original-guest100 MiB benchmark uses
+gettimeofday around100 one-MiB memset calls; scripts target/make-memset-bench.py
+and target/compare-memset.mjs, previous runtime preserved under
+ target/runtime-before-memset/. No benchmark or game gain claimed yet.
+
+
+Chunked memset runtime builds and the original ARM regression passes twice in
+Chromium forced-JIT (target/jit-memset-{runtime-build,browser}.log). Isolated
+actual guest gettimeofday benchmark,100 calls of1 MiB each, new/old/new groups
+with five fresh workers each: medians78/9158/74.001 ms; ranges69–79.001,
+9136–9242,67–81 ms. Approximately120x faster for this workload, not game FPS.
+No overlapping build/test/game during timings. target/jit-memset-comparison.log.
+
+Reproduce benchmark IPA with `python3 web/fixtures/make-hle-ipa.py --memset-bench`:
+original guest prints MEMSET_START/END seconds and microseconds. Local browser
+comparison script target/compare-memset.mjs routes old runtime assets from
+ target/runtime-before-memset/ for the middle group. Initial measured local
+fixture and new tracked generator produce identical extracted files; ZIP binary
+comparison differs only because timestamps differ. Native actual guest and nine
+graphics regressions underway; clean-game effect remains unmeasured.
+
+Native actual ARM HLE fixture exits0 with updated fill. All nine forced-JIT
+graphics fixtures each pass twice; formatting/diff checks pass. Logs
+ target/jit-memset-native-guest.log and target/jit-memset-{MIPMAP,COMBINE,LIGHTING,
+LIGHT_ATTENUATION,LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log.
+Clean TinkerBox run started after all tests finished, without competing work.
+
+
+Chunked-fill clean TinkerBox run: menu152 s; training input229 s to Play397 s
+=168 s (driver matched canvas-393.png), versus173 s prior. Five seconds is below
+screenshot precision; no material loading gain established for this change.
+First60 s after Play:49 FPS log samples, median3.25, range2.19–3.53, versus3.19
+prior; no real-time claim. Both lessons SUCCESS in canvas-463.png/canvas-723.png
+under target/browser-jit-memset/. Actual touch placement verified in
+lesson2-placed.png and pinch accepted. No competing build/test/profile through
+both lessons. Logs target/jit-memset-{game,driver}.log. Stop requested through UI
+after success. Retain the simple measured fill improvement, with its limited game
+effect explicit. Next focus remaining CPU dispatch/generated-code/compilation
+cost; all original game/device acceptance targets remain open.

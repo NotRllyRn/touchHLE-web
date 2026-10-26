@@ -68,7 +68,15 @@ fn bzero(env: &mut Environment, dest: MutVoidPtr, count: GuestUSize) {
     memset(env, dest, 0, count);
 }
 fn memset(env: &mut Environment, dest: MutVoidPtr, ch: i32, count: GuestUSize) -> MutVoidPtr {
-    GenericChar::<u8>::memset(env, dest.cast(), ch as u8, count, GuestUSize::MAX).cast()
+    let mut offset = 0;
+    while offset < count {
+        let ptr = dest.cast::<u8>() + offset;
+        // Browser mappings are page-aligned but may have separate host storage.
+        let len = (count - offset).min(4096 - (ptr.to_bits() & 4095));
+        env.mem.bytes_at_mut(ptr, len).fill(ch as u8);
+        offset += len;
+    }
+    dest
 }
 fn __memset_chk(
     env: &mut Environment,
@@ -77,7 +85,8 @@ fn __memset_chk(
     count: GuestUSize,
     dest_count: GuestUSize,
 ) -> MutVoidPtr {
-    GenericChar::<u8>::memset(env, dest.cast(), ch as u8, count, dest_count).cast()
+    assert!(count <= dest_count, "buffer overflow!");
+    memset(env, dest, ch, count)
 }
 fn memset_pattern4(env: &mut Environment, b: MutVoidPtr, pattern4: ConstVoidPtr, len: GuestUSize) {
     memset_pattern_inner(env, b, pattern4, len, 4)
