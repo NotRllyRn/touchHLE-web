@@ -1918,3 +1918,78 @@ and static GET-only traffic. Actual Web Audio passes. Logs:
 Retain the bridge for its isolated measured benefit after these regressions.
 Fresh clean TinkerBox loading/gameplay measurement is next; game performance
 and final hardware/browser acceptance remain outstanding.
+
+### Helper-bridge game and guarded float experiment (2026-10-26)
+
+Fresh d9bf3e8b source runtime (embedded pre-commit6eb95dd2) clean interval:
+terms match152 s, menu182 s, training input258 s, Play match502 s/input508 s.
+Training-to-Play250 s versus310 s for the live-register clean trial, about19%
+less in these single trials. Menu match20 s earlier. No build/profile overlaps
+this first-Play interval. Gameplay remains roughly3 FPS on SwiftShader. Later
+diagnostic work is excluded from timing. Lesson2 SUCCESS is verified at1532 s
+after second Play1472 s (`target/browser-jit-call-bridge/canvas-1532.png`).
+The owned inspector was then stopped deliberately through Stop. Logs:
+`target/jit-call-bridge-{game,driver,drag}.log`. Targets remain unmet.
+
+A narrower exact-cancellation C patch was tested but set aside, not retained:
+original result/FPSCR fingerprints and Node/Chromium suites pass; new/old/new
+cancellation medians11.962/21.083/10.408 ms. Ordinary-add medians22.341/21.646/
+21.099 ms. Logs `target/jit-fp-cancel-{build,node,browser,comparison}.log`; benchmark
+reference built by temporary reverse/reapply, then production source restored.
+The cancellation benchmark remains useful for future fallback-cost comparisons.
+
+A15 s diagnostic of the running bridge game's idle Lesson2 wrapped the call
+bridge temporarily, preserving its arguments/results. Runtime Wasm table/name
+sections identify the three VFP helpers; they are not guessed from pointer values.
+Compiled functions were evicted with dispatch clear before table removal both
+when installing and restoring the wrapper, retaining translation metadata.
+Observed2224491 helper calls,1121862 multiplies,302106 adds,139272 subtracts.
+Multiply inexact flag already set1110739 times; add302106; subtract139270.
+All observed rounding modes were nearest-even. Eligible nonzero cancellations
+were only90 adds and270 subtracts. This is an idle-rendering sample, not a startup
+or simulation distribution. It does not justify making cancellation the next
+optimization priority. Probe cleanup restores the original bridge and recompiles
+without instrumentation. `target/jit-call-bridge-float-inputs.log`.
+
+Next experiment specializes the four exact normalized VFP ADD/MUL/SUB/DIV
+helper identities exported by C. It mirrors QEMU's existing hardfloat gate:
+nearest-even, inexact already sticky, inputs normal-or-zero. Generated Wasm
+uses f32 arithmetic only when the result magnitude is strictly greater than
+FLT_MIN and below infinity. All other cases invoke the unchanged C bridge
+with original operands, preserving NaNs, under/overflow, signed zeros, other
+rounding modes, FZ/DN and exception flags. Status offsets and enum values come
+from C rather than assumed packing. This changes no C floating-point arithmetic.
+
+JS23 and initial actual Node suites pass. DIV extends the guest corpus to65536
+operations per adapter invocation; interpreter and JIT both produce4803deb0,
+now pinned alongside the three original fingerprints. Known1/2 result checks
+validate the DIV encoding. Initial logs `target/jit-float-guard-{js,build,node}.log`.
+Final browser checks and paired sticky/clear-flag benchmarks are in progress;
+this guarded float optimization is not yet accepted.
+
+Guarded float final Node/Chromium CPU/fibers pass with all four fingerprints
+asserted (`target/jit-float-guard-final-{build,node}.log`,
+`target/jit-float-guard-browser.log`). The paired benchmark explicitly covers
+clear and sticky inexact states. Same-Wasm enabled/disabled/enabled5-trial
+medians (ms): normal-add with sticky5.186/10.805/4.087; normal-multiply with
+sticky4.983/10.666/4.072; zero-add with sticky5.206/10.212/4.111.
+
+Clear-flag fallbacks: normal-add22.429/22.427/22.196; normal-multiply20.154/
+19.149/19.253; zero-add22.662/21.542/21.638; zero-multiply20.650/18.370/17.750.
+Sticky zero-multiply (tiny result, deliberately fallback)12.257/10.685/10.607;
+cancellation22.256/20.829/20.147. Other medians: SVC106.231/104.734/105.085,
+doubleword4.872/4.727/4.644, code-page memory51.801/50.290/50.246, data-memory
+6.233/5.823/6.156. First-case warmup/noise remains; eligible arithmetic improves
+materially without a sustained large fallback regression in this comparison.
+No concurrent game/build. Logs: `target/jit-float-guard-{benchmark,comparison}.log`.
+Eight-patch roundtrip, repeated patch application, formatting/diff pass.
+Full runtime/HLE validation is underway before retaining the change.
+
+Guarded-float full runtime rebuild succeeds (`target/jit-float-guard-runtime-
+build.log` and `jit-float-guard-web-build.log`). Nine graphics fixtures MIPMAP,
+COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED, POINT_PARAMETERS
+and PRESENT_BUFFERS each pass twice with forced JIT threshold1 and no compile
+failures; actual Web Audio passes. `target/jit-float-guard-TEST_*.log` and
+`target/jit-float-guard-audio.log`. Retain this guarded implementation for its
+measured eligible-case gain and passing regressions. Fresh clean TinkerBox
+loading/gameplay validation follows; M4/M5 and the goal remain open.

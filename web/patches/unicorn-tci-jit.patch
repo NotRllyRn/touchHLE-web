@@ -1,6 +1,6 @@
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -478,18 +478,51 @@
+@@ -478,18 +478,54 @@
  uintptr_t tci_tb_ptr;
  #endif
  
@@ -38,7 +38,10 @@
 +            Module['tciJitThreshold'] ?? 32,
 +            {counter, call: wasmTable.get(call), clear: wasmExports['touchhle_tci_clear_dispatch'],
 +             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 5)),
-+             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]}});
++             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]},
++             floatMath: {callees: Array.from(HEAPU32.subarray((layout >> 2) + 7, (layout >> 2) + 11)),
++              rounding: HEAPU32[(layout >> 2) + 11], flags: HEAPU32[(layout >> 2) + 12],
++              nearest: HEAPU32[(layout >> 2) + 13], inexact: HEAPU32[(layout >> 2) + 14]}});
 +    }
 +    return !!Module['tciJit'];
 +});
@@ -63,7 +66,7 @@
      for (;;) {
          TCGOpcode opc = tb_ptr[0];
  #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-@@ -550,6 +583,7 @@
+@@ -550,6 +586,7 @@
              label = tci_read_label(&tb_ptr);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr = (uint8_t *)label;
@@ -71,7 +74,7 @@
              continue;
          case INDEX_op_setcond_i32:
              t0 = *tb_ptr++;
-@@ -752,7 +786,8 @@
+@@ -752,7 +789,8 @@
              if (tci_compare32(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -81,7 +84,7 @@
              }
              break;
  #if TCG_TARGET_REG_BITS == 32
-@@ -778,7 +813,8 @@
+@@ -778,7 +816,8 @@
              if (tci_compare64(tmp64, v64, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -91,7 +94,7 @@
              }
              break;
          case INDEX_op_mulu2_i32:
-@@ -1026,7 +1062,8 @@
+@@ -1026,7 +1065,8 @@
              if (tci_compare64(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -101,7 +104,7 @@
              }
              break;
  #if TCG_TARGET_HAS_ext8u_i64
-@@ -1123,7 +1160,7 @@
+@@ -1123,7 +1163,7 @@
              tb_ptr += sizeof(int32_t);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr += (int32_t)t0;
@@ -110,7 +113,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1273,7 +1310,76 @@
+@@ -1273,7 +1313,80 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -158,7 +161,11 @@
 +            offsetof(struct uc_struct, touchhle_read_size), offsetof(struct uc_struct, touchhle_read_pointer),
 +            offsetof(struct uc_struct, touchhle_code_pages),
 +            (uintptr_t)glue(adapter_helper_, check_exit_request),
-+            offsetof(ArchCPU, neg.icount_decr.u32) - offsetof(ArchCPU, env)
++            offsetof(ArchCPU, neg.icount_decr.u32) - offsetof(ArchCPU, env),
++            (uintptr_t)glue(adapter_helper_, vfp_adds), (uintptr_t)glue(adapter_helper_, vfp_muls),
++            (uintptr_t)glue(adapter_helper_, vfp_subs), (uintptr_t)glue(adapter_helper_, vfp_divs),
++            offsetof(float_status, float_rounding_mode), offsetof(float_status, float_exception_flags),
++            float_round_nearest_even, float_flag_inexact
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
 +            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout, (uintptr_t)touchhle_tci_call);

@@ -93,3 +93,14 @@ helper-import architecture and retains its arithmetic/exception implementations.
 The original single-operation interpreter remains the memory/unsupported path
 and the compatibility path for a runtime without this bridge. Repeated-instance,
 CPU exception, floating-point fingerprint and fiber tests gate integration.
+
+## Guarded VFP arithmetic
+
+Specialize only the common path already allowed by QEMU's hardfloat policy:
+nearest-even, sticky inexact, normal/zero operands, and a normal finite result
+strictly larger than FLT_MIN. C exports helper identities, status offsets and
+enum values; generated core Wasm f32 operations preserve the original fallback
+for all other cases. This avoids a helper call for measured hot arithmetic
+without changing floating-point semantics or requiring a new ARM decoder.
+The pinned interpreter supplies result/FPSCR fingerprints across rounding,
+FZ/DN, sticky flags, edge values and seeded inputs, including division.

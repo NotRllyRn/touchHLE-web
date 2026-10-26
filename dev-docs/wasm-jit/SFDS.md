@@ -119,3 +119,13 @@ split into r0/r1. This preserves exception bookkeeping without saving all helper
 arguments into the interpreter's temporary array. Memory helpers still use the
 existing single-operation path when inline access is ineligible. Older runtime
 artifacts without the bridge continue to use the original helper path.
+
+Guarded VFP single-precision ADD/MUL/SUB/DIV can emit core Wasm f32 operations
+when the exact normalized helper identity matches C-provided metadata. Read
+rounding/exception fields using C-provided offsets: nearest-even and an already
+sticky inexact flag are required. Both inputs must be normal or zero; the result
+must have magnitude strictly above FLT_MIN and below infinity. Otherwise invoke
+the unchanged helper with original operands. This conservatively excludes
+NaNs, infinities, denormals, tiny results, overflow, alternate rounding and
+flag-sensitive cases. The fast path returns zero-extended float bits and changes
+no status flags. No relaxed SIMD, fast-math or arithmetic fusion is introduced.

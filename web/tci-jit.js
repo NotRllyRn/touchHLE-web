@@ -208,11 +208,36 @@
           helper(pc, [0,1,2,3,5,6,7,8,9,10,11,12], [0,1]);
           emit(0x05); constant(0); put(0); constant(0); put(1); emit(0x0b);
         } else if (name === 'call' && this.dispatch?.call) {
-          constant(pc); operand();
-          for (const i of [0,1,2,3,5,6,7,8,9,10,11,12]) reg(i);
-          emit(0x10, 1); set(20);
-          get(20); emit(0xa7); put(0);
-          get(20); emit(0x42, 32, 0x88, 0xa7); put(1);
+          const functionReg = byte(), callee = functionReg === 255 ? word() : null;
+          const invoke = () => {
+            constant(pc); if (callee === null) reg(functionReg); else constant(callee);
+            for (const i of [0,1,2,3,5,6,7,8,9,10,11,12]) reg(i);
+            emit(0x10, 1); set(20);
+            get(20); emit(0xa7); put(0);
+            get(20); emit(0x42, 32, 0x88, 0xa7); put(1);
+          };
+          const fp = this.dispatch.floatMath;
+          const operation = callee === null ? -1 : fp?.callees.indexOf(callee) ?? -1;
+          if (operation >= 0) {
+            // Match QEMU's hardfloat gate. Inexact must already be sticky;
+            // denormals, NaNs, infinities and tiny/overflow results use QEMU.
+            reg(5); emit(0x2d, 0, ...uleb(fp.rounding)); constant(fp.nearest); emit(0x46);
+            reg(5); emit(0x2d, 0, ...uleb(fp.flags)); constant(fp.inexact); emit(0x71, 0x45, 0x45, 0x71);
+            for (const r of [0,2]) {
+              reg(r); constant(0x7fffffff); emit(0x71); set(22);
+              get(22); emit(0x45);
+              get(22); constant(0x00800000); emit(0x4f);
+              get(22); constant(0x7f800000); emit(0x49, 0x71, 0x72, 0x71);
+            }
+            emit(0x04, 0x7f);
+            reg(0); emit(0xbe); reg(2); emit(0xbe, [0x92,0x94,0x93,0x95][operation], 0xbc); set(21);
+            get(21); constant(0x7fffffff); emit(0x71); set(22);
+            get(22); constant(0x00800000); emit(0x4b);
+            get(22); constant(0x7f800000); emit(0x49, 0x71);
+            emit(0x05); constant(0); emit(0x0b, 0x04, 0x40);
+            get(21); put(0); constant(0); put(1);
+            emit(0x05); invoke(); emit(0x0b);
+          } else invoke();
         } else if (name === 'exit_tb') {
           save(); get(3); constant(word()); emit(0x36, 2, 0); word();
           constant(0); emit(0x0f);

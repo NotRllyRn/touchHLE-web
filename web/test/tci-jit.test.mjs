@@ -151,6 +151,35 @@ test('normalized call bridge preserves operand order, wide results and exception
   }
 });
 
+test('guarded float operations retain rounding, flag and special-value fallback', () => {
+  const bitsBuffer=new ArrayBuffer(4), bitsView=new DataView(bitsBuffer);
+  const bits=x=>{bitsView.setFloat32(0,x,true);return bitsView.getUint32(0,true);};
+  const value=x=>{bitsView.setUint32(0,x,true);return bitsView.getFloat32(0,true);};
+  const normalOrZero=x=>!(x&0x7fffffff)||((x&0x7fffffff)>=0x00800000&&(x&0x7fffffff)<0x7f800000);
+  const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[Infinity,1],[NaN,1],
+    [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(1),1]].map(p=>p.map(bits));
+  for(let i=0;i<300;i++)pairs.push([random(),random()]);
+  const operations=[(a,b)=>a+b,(a,b)=>a*b,(a,b)=>a-b,(a,b)=>a/b];
+  for(let operation=0;operation<4;operation++) {
+    let calls=0;
+    const f=fixture([...op('call',...imm(900+operation)),...exit()],undefined,
+      {counter:96,clear(){},call(){calls++;return 0x11223344n;},
+        floatMath:{callees:[900,901,902,903],rounding:0,flags:1,nearest:0,inexact:32}});
+    const status=new Uint8Array(f.memory.buffer,4096,2);
+    for(const rounding of [0,1])for(const flags of [0,32,33])for(const [a,b] of pairs) {
+      f.regs()[0]=a;f.regs()[1]=123;f.regs()[2]=b;f.regs()[5]=4096;
+      status[0]=rounding;status[1]=flags;
+      const expected=bits(operations[operation](value(a),value(b))), magnitude=expected&0x7fffffff;
+      const fast=rounding===0&&(flags&32)&&normalOrZero(a)&&normalOrZero(b)&&magnitude>0x00800000&&magnitude<0x7f800000;
+      const before=calls;f.run();
+      assert.equal(calls-before,fast?0:1);
+      assert.equal(f.regs()[0],fast?expected:0x11223344);
+      assert.equal(f.regs()[1],0);
+      assert.deepEqual([...status],[rounding,flags]);
+    }
+  }
+});
+
 test('inline fixed-region reads preserve bounds, fallback, engine identity and memory growth', () => {
   for (const memop of [2, 0x12, 0x22, 0x72, 10, 0x32]) {
     let calls = 0;

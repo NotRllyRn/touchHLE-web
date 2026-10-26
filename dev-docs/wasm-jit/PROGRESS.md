@@ -201,3 +201,19 @@ idempotence pass. Full runtime/HLE/game checks pending; goal remains active.
 
 Call-bridge full runtime, nine forced-JIT graphics fixtures twice and audio pass.
 Retain pending fresh clean game timing/correctness; M4/M5 remain open.
+
+Bridge clean game: menu182 s, training258 s to Play508 s (250 s, vs310 s);
+~3 FPS. Lesson2 SUCCESS1532 s verified. Cancellation C experiment set aside
+after low observed frequency; source reverted. Call sampling instead supports
+guarded native Wasm float operations matching QEMU's existing hardfloat gate.
+Prototype passes JS23 and initial Node corpus; DIV fingerprint4803deb0 adds
+coverage to65536 operations/invocation. Browser checks/benchmarks pending.
+
+Guarded floats pass final Node/Chromium CPU/fibers and all65536-operation
+fingerprints. Same-Wasm sticky normal-add5.186/10.805/4.087 ms and normal-
+multiply4.983/10.666/4.072; clear-flag fallback normal-add22.429/22.427/22.196.
+Eight-patch roundtrip/idempotence and formatting pass. Full build/HLE pending.
+
+Guarded-float full runtime, nine forced-JIT graphics fixtures twice and actual
+audio pass. Retain; fresh clean game measurement and two-lesson validation
+remain next. No under10 s/real-time or hardware-device acceptance claim.
