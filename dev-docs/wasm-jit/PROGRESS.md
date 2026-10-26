@@ -338,3 +338,15 @@ preserves flags while accelerating clear-inexact add/mul/cancellation ~3–4x in
 synthetic comparisons. Actual Node/Chromium fingerprints, precision/tie cases,
 cache/fibers, JS28 and nine graphics fixtures twice pass; code growth~2.7% in
 benchmark corpus. Fresh clean game and both lessons next; no game gain claimed.
+
+Exact-arithmetic clean game: menu162 s; training234 to Play438 =204 s, ~3.3 FPS.
+Both lessons SUCCESS523/813 s. Five seconds versus209 s prior is below sampling
+precision, despite large finite-math microbenchmark gains. Transition fallback
+probe reveals mostly NaN arithmetic; later steady sample has almost none.
+Next capture NaN bit patterns during loading before choosing a safe specialization.
+
+Fresh startup probe confirms2.635M helper calls with two canonical7fc00000
+quiet NaNs returning7fc00000 (~62% of sampled helper calls). Diagnostic ends
+normally. Pinned ARM rules support a narrow exact-pair shortcut; implement/test
+that next while retaining every other NaN/helper case. Original targets remain
+unmet; source/evidence pushed incrementally.

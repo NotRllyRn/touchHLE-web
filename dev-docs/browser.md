@@ -2561,3 +2561,44 @@ Static build and all nine forced-JIT graphics fixtures each pass twice. Logs
 LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log`. Retain candidate
 for a fresh clean game measurement and both lesson checks. No runtime relink
 needed: Rust/C production code and metadata are unchanged; worker imports JS.
+
+Exact-arithmetic clean game d9475b81: menu162 s; training input234 s to Play438 s
+(screenshot433 s) =204 s, versus209 s previously. This single five-second
+difference is below screenshot precision; no material loading gain established.
+Approximately3.3 FPS. No build/test/profile before Play. Both lessons pass:
+SUCCESS canvas-523.png and canvas-813.png in `target/browser-jit-exact-arithmetic/`.
+Lesson2 actual touch placement verified. Diagnostics after Play perturb later
+timestamps, which are correctness evidence only. Deliberately stopped via UI.
+
+Temporary helper wrapper after Play (roughly525–540 s, crossing into Lesson2)
+observed3,057,599 helper calls/15.019 s. Among remaining specialized FP fallback
+calls:396586 multiply,318937 add,197429 subtract,24 divide. Most are NaN pairs:
+332744 multiply,300971 add,179493 subtract with sticky inexact; further zero/NaN
+and infinity cases dominate the rest. Wrapper uses C-exported identities/status
+offsets, preserves results, clears dispatch before module eviction, and restores
+original imports in finally. `target/jit-exact-arithmetic-fallbacks.log`.
+This explains why ordinary finite arithmetic benchmarks overpredict game gains.
+
+A later15.105 s sample (~891–906 s, after Lesson2) observed797730 helper calls
+but only70 tracked FP fallbacks (normal multiply rounding to zero), no NaN pairs.
+`target/jit-exact-arithmetic-nan-pairs.log`. Phase matters; do not generalize the
+transition distribution to steady gameplay. A short fresh startup diagnostic is
+now collecting actual NaN operand/result patterns before any NaN specialization.
+Read-only ARM source confirms signaling/payload/default-NaN rules must remain
+intact; no NaN fast path has been implemented yet. M4/M5 remain open.
+
+Fresh startup NaN probe (15.040 s,4,248,963 helper calls) captures canonical
+quiet-NaN pairs:1077870 multiplies,975196 adds,582253 subtracts have operand /
+operand / result bits7fc00000/7fc00000/7fc00000. This is2,635,319 calls, about62%
+of instrumented helper calls and89% of tracked FP fallbacks. Other observed NaN
+pairs involve zero or infinity. `target/jit-nan-startup-pairs.log`; diagnostic
+screenshots/log under `target/browser-jit-nan-startup/`, `jit-nan-startup-game.log`.
+The180 s inspector finished normally (exit0, final logs184 s); a later Stop
+attachment got ECONNREFUSED because the process had already ended. No restart.
+
+Read-only review of pinned softfloat-specialize.inc.c confirms ARM uses quiet
+bit22, default positive NaN7fc00000, and ARM NaN selection rules. Two identical
+canonical quiet NaNs return that same value without raising invalid, independent
+of rounding/default-NaN modes; other payloads/signaling cases require the helper.
+Next implement and measure only this exact observed pair, with all FPSCR modes
+and flags validated before retention. No NaN shortcut is currently committed.
