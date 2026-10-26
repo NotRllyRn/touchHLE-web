@@ -2,12 +2,19 @@
 // Local graphical diagnostics, not a gameplay acceptance test.
 import { mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const ipa = process.argv[2];
 if (!ipa) throw new Error('Usage: node web/inspect-ipa.mjs /absolute/path/to/app.ipa');
 const output = process.env.INSPECTION_DIR || fileURLToPath(new URL('../target/browser-inspection/', import.meta.url));
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const args = ['--no-sandbox'];
+if (process.env.INSPECTION_PORT) {
+  const port = Number(process.env.INSPECTION_PORT);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid inspection port');
+  args.push(`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1');
+}
+const browser = await chromium.launch({ headless: true, args });
 try {
   const page = await browser.newPage();
   const started = Date.now();
@@ -31,7 +38,7 @@ try {
   await page.locator('#run').click();
   // Optional clicks use fractions of the displayed canvas: [{second,x,y}].
   const clicks = JSON.parse(process.env.CLICKS || '[]');
-  const control = `${output}control-${process.pid}.json`;
+  const control = join(output, `control-${process.pid}.json`);
   console.log(`Live pointer control: append {x,y} objects to a JSON array in ${control}`);
   let processed = 0;
   const sentClicks = new Set();

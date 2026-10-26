@@ -3,12 +3,15 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const ipa = process.env.TEST_IPA;
-if (!ipa) throw new Error('TEST_IPA must identify a locally owned IPA');
+if (!ipa && !process.env.PROFILE_CDP) throw new Error('TEST_IPA must identify a locally owned IPA');
 const output = process.env.PROFILE_DIR || 'target/jit-profile';
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const browser = process.env.PROFILE_CDP
+  ? await chromium.connectOverCDP(process.env.PROFILE_CDP)
+  : await chromium.launch({ headless: true, args: ['--no-sandbox'] });
 try {
-  const page = await browser.newPage(), logs = [], errors = [];
+  const page = process.env.PROFILE_CDP ? browser.contexts()[0].pages()[0] : await browser.newPage();
+  const logs = [], errors = [];
   const started = performance.now();
   page.on('console', message => logs.push({ ms: performance.now()-started, text: message.text() }));
   page.on('pageerror', error => errors.push(String(error)));
@@ -23,10 +26,12 @@ try {
       }
     };
   });
-  await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8765/?cpu=jit');
-  await page.locator('#ipa').setInputFiles(ipa);
-  await page.waitForFunction(() => !document.querySelector('#run').disabled);
-  await page.locator('#run').click();
+  if (!process.env.PROFILE_CDP) {
+    await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8765/?cpu=jit');
+    await page.locator('#ipa').setInputFiles(ipa);
+    await page.waitForFunction(() => !document.querySelector('#run').disabled);
+    await page.locator('#run').click();
+  }
   await page.waitForTimeout(Number(process.env.PROFILE_DELAY_MS || 10000));
   const cdp = await browser.newBrowserCDPSession();
   const { targetInfos } = await cdp.send('Target.getTargets');

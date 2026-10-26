@@ -1288,3 +1288,22 @@ menu at 302.8 s: 55,437,560 compiled dispatches, zero compilation failures,
 6,890 cumulative compilations, 5,068.5 ms cumulative compilation time and no
 metadata resets (`target/jit-budget-game.log`). Startup acceptance remains unmet.
 A longer run with attached Profiler is collecting later loading evidence.
+
+Later startup sample: `PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+PROFILE_CDP=http://127.0.0.1:9241 PROFILE_DELAY_MS=100000 PROFILE_MS=15000
+PROFILE_DIR=target/jit-late-profile node web/profile-runtime.mjs` attached to the
+existing inspector without Debugger. Chromium 141, 13,671 samples, no page errors.
+Top self samples: idle 2,006, maybeStopUnwind 1,753, TCI interpreter 1,707,
+load_helper 960, wasm-to-js 931, js-to-wasm 662, address translation 636.
+Profiler output and screenshots are local-only. Attaching/disconnecting preserved
+the inspector run. This run later overlaps builds, so is not an acceptance timing.
+
+Inspection shows the JIT imports the Asyncify-wrapped exported single-op helper,
+forcing a JS round trip for each guest-memory/VFP helper. The next experiment
+passes that same C function's table index at initialization and imports its raw
+Wasm function. It does not replace helper implementations or their exceptions;
+CPU execution is synchronous and already excluded from Asyncify. This differs
+from the rejected direct normalized QEMU-helper experiment. Node CPU/fault/cache/
+context/fiber regressions pass (`target/jit-raw-step-node.log`). Full runtime and
+browser tests are pending. Inspector now joins its control-file path correctly
+with or without a trailing directory slash; CDP attachment is opt-in, loopback.
