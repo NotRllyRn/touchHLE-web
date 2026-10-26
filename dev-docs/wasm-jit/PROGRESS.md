@@ -416,3 +416,18 @@ Actual changed code confirmed despite coincidentally equal byte totals. Restore
 production compiler/metadata; retain finite/fallback long-chain benchmarks and
 startup profile evidence. Restoration CPU/benchmark validation pending. Full game
 runtime stayed on b0ec3cd5 throughout these experiments; game targets remain open.
+
+
+Exact canonical quiet-NaN/positive-zero shortcut implemented only in existing
+fallback branch. JS28 and Node CPU/FPSCR/cache/fiber regressions pass, including
+256 new ARM operation/mode checks. Chromium and isolated long-chain benchmark
+pending; ordinary fast arithmetic incurs no new executed predicate. No goal closure.
+
+
+NaN/+0 candidate passes JS28, Node/Chromium CPU/FPSCR/cache/fibers and all nine
+graphics fixtures twice. Same-runtime fallback-chain benchmarks improve~5.5x
+and7.4x, emitted bytes+5.7%; ordinary arithmetic does not improve. Clean game
+menu142 s, Training206 to Play364 =158 s vs168 s prior (single-run difference
+of one screenshot interval); FPS median3.16 vs3.25, no gain. Both lessons SUCCESS
+432/622 s with real zoom/placement. Retain small tested shortcut; next profile
+remaining startup helpers. M4/M5 and thread goal remain open.

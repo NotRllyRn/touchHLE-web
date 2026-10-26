@@ -2866,3 +2866,50 @@ result/flag assertions. Logs target/jit-vfp-chains-restored-{js,build,node,brows
 benchmark}.log. Full game runtime remains unchanged. Next measured candidate is
 an exact canonical quiet-NaN/positive-zero shortcut within the existing fallback
 branch, preserving ordinary fast-path cost; verify pinned ARM NaN/zero flags.
+
+
+Canonical quiet-NaN/positive-zero candidate (after1a3c5adb): in the existing
+float fallback branch, require `(a | b) == 0x7fc00000` and at least one operand
+word exactly zero. Thus the other is exactly the canonical quiet NaN. Return
+canonical bits and zero high word without changing status. The pinned soft-float
+rules select quiet NaN before zero arithmetic, including division; neither input
+is denormal/signaling. Ordinary successful arithmetic and two-canonical-NaN
+paths do not execute the new predicate. All other cases retain helper semantics.
+
+JS28 pass with negative-zero, signaling/payload and split-bit lookalike cases.
+Actual ARM tests add256 checks (four operations ×32 modes ×two operand orders)
+to the prior128 canonical-pair cases; test exact result and unchanged FPSCR.
+Node CPU/cache/fiber checks pass; Chromium verification and benchmark pending.
+Formatting/diff checks pass. Logs target/jit-nan-zero-{js,final-js,build,node,browser}.log.
+Candidate is not committed and no game improvement is claimed yet.
+
+Canonical-NaN/zero passes actual Chromium CPU/FPSCR/cache/fibers. Isolated
+same-runtime new/old/new benchmark medians (five trials each; ms): NaN+zero chain
+99.718/551.704/100.632; sticky74.167/536.024/72.513 (~5.5x and7.4x faster).
+Finite chain149.874/139.085/139.681; sticky79.354/76.645/79.654 (~4% slower).
+Linked112.776/109.086/108.569, memory47.857/48.013/48.145,
+SVC126.854/119.903/123.886. Initial group is generally slower; no broad normal-
+arithmetic gain claimed. Emitted470803/445423/470803 bytes (+5.7%),154 modules,
+zero failures each. Compilation359.9/308.9/314.7 ms. Logs
+ target/jit-nan-zero-{benchmark,comparison}.log. Static build/graphics checks
+underway, then clean game timing will determine retention.
+
+
+Canonical-NaN/zero retained after clean game: menu canvas142 s, Training input206
+to Play364 =158 s versus168 s baseline (single runs; screenshot cadence10 s,
+so the10 s difference is modest evidence). Lesson1 SUCCESS at432 s and Lesson2
+SUCCESS622 s; pinch and real touch drag placement verified. First60 s after Play
+has49 logged FPS samples: median3.16, range2.36–3.54 (baseline3.25 median). No
+frame-rate improvement claimed. Chromium141/ANGLE SwiftShader, no hardware GPU.
+Under10 s and30 FPS targets remain unmet. Logs target/jit-nan-zero-{game,driver}.log;
+local screenshots target/browser-jit-nan-zero, including lesson2-placed.png.
+
+All nine forced-JIT graphics fixtures pass twice: MIPMAP, COMBINE, LIGHTING,
+LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED, POINT_PARAMETERS, PRESENT_BUFFERS
+(logs target/jit-nan-zero-<fixture>.log). npm run build --prefix web, JS28,
+Node/Chromium CPU/FPSCR/cache/fibers, cargo fmt --check and git diff --check pass.
+No production Rust/C change requires runtime relinking; refreshed compiler is
+served from web/dist. Inspector exited1 after deliberate Stop; driver exited0.
+Next: diagnostic startup helper distribution after these shortcuts; keep its
+instrumented timings separate from acceptance. Native/mobile/other-browser
+coverage is unchanged.

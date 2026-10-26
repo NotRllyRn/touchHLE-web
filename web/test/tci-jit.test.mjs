@@ -187,12 +187,14 @@ test('guarded float operations retain rounding, flag and special-value fallback'
   const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[-0,-1],[0,-1],[1.1,1.1],
     [2**-100,2**-100],[1,2**-29],[1,2**-30],[1,2**-100],[-0,-0],
     [value(0x00800001),value(0x00800000)],[value(0x00800001),-value(0x00800000)],
-    [Infinity,1],[NaN,1],[NaN,NaN],
+    [Infinity,1],[NaN,1],[NaN,NaN],[NaN,0],[0,NaN],[NaN,-0],[-0,NaN],
     [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(0x00800001),1],
     [value(0x007fffff),1],[value(0x7f7fffff),1],[value(1),1]].map(p=>p.map(bits));
   // Keep raw NaN payloads: converting through JS numbers can quiet sNaNs.
   for(const other of [0x7fc00001,0xffc00000,0x7f800001,0,0x7f800000])
     pairs.push([0x7fc00000,other],[other,0x7fc00000]);
+  pairs.push([0x7f800000,0x00400000],[0x00400000,0x7f800000],
+    [0x7fc00001,0],[0,0x7f800001]);
   for(let i=0;i<300;i++)pairs.push([random(),random()]);
   const operations=[(a,b)=>a+b,(a,b)=>a*b,(a,b)=>a-b,(a,b)=>a/b];
   for(let operation=0;operation<4;operation++) {
@@ -204,7 +206,7 @@ test('guarded float operations retain rounding, flag and special-value fallback'
     for(const rounding of [0,1])for(const flags of [0,32,33])for(const [a,b] of pairs) {
       f.regs()[0]=a;f.regs()[1]=123;f.regs()[2]=b;f.regs()[5]=4096;
       status[0]=rounding;status[1]=flags;
-      const canonical=a===0x7fc00000&&b===0x7fc00000;
+      const canonical=a===0x7fc00000&&(b===0x7fc00000||b===0)||b===0x7fc00000&&a===0;
       const expected=canonical?0x7fc00000:bits(operations[operation](value(a),value(b))), magnitude=expected&0x7fffffff;
       const addSub=operation===0||operation===2;
       const zeroOperand=!(a&0x7fffffff)||!(b&0x7fffffff);

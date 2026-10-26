@@ -346,10 +346,11 @@ void adapter_checks(void) {
       assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
       assert(regs[0] == 0x3f800002 && regs[1] == 0x10);
     }
-    for (unsigned mode = 0; mode < 32; ++mode) {
+    for (unsigned mode = 0; mode < 32; ++mode) for (unsigned pair = 0; pair < 3; ++pair) {
       uint32_t fpscr = ((mode & 3) << 22) | ((mode & 4) << 22) |
                        ((mode & 8) << 22) | (mode & 16 ? 0x9f : 0);
-      regs[0] = regs[1] = 0x7fc00000; regs[2] = fpscr;
+      regs[0] = pair == 1 ? 0 : 0x7fc00000;
+      regs[1] = pair == 2 ? 0 : 0x7fc00000; regs[2] = fpscr;
       regs[15] = 0x1000; ticks = 100;
       assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
       assert(regs[0] == 0x7fc00000 && regs[1] == fpscr);

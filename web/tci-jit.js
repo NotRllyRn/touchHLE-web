@@ -287,7 +287,14 @@
             get(21); put(0); constant(0); put(1);
             emit(0x05);
             defined.clear(); for (const r of incoming) defined.add(r);
-            invoke(); emit(0x0b, 0x0b);
+            // Exactly one positive zero and one canonical quiet NaN: ARM
+            // returns that NaN without flag changes, even for division by zero.
+            // Keep this check off the ordinary successful arithmetic path.
+            reg(0); reg(2); emit(0x72); constant(0x7fc00000); emit(0x46);
+            reg(0); emit(0x45); reg(2); emit(0x45, 0x72, 0x71, 0x04, 0x40);
+            constant(0x7fc00000); put(0); constant(0); put(1); emit(0x05);
+            defined.clear(); for (const r of incoming) defined.add(r);
+            invoke(); emit(0x0b, 0x0b, 0x0b);
           } else invoke();
         } else if (name === 'exit_tb') {
           save(); get(3); constant(word()); emit(0x36, 2, 0); word();

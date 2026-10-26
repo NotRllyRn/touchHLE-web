@@ -210,3 +210,18 @@ and with a canonical quiet NaN plus zero. Verify result bits and FPSCR for both
 clear and sticky inexact. The latter exercises repeated helper fallback observed
 during game startup. Report these separately from one-operation loops so moving
 rare paths out of a compiled block cannot hide a fallback-heavy regression.
+
+
+## Canonical quiet NaN with positive zero
+
+Inside the existing float-helper fallback branch, require both
+`(a | b) == 0x7fc00000` and `(a == 0 || b == 0)`. Return canonical NaN and
+zero high word, preserving FPSCR. This adds no executed predicate to successful
+finite arithmetic or the existing canonical/canonical path. Negative zero and
+all other pairs retain helper behavior. Restore incoming definite-assignment
+state before emitting the helper arm.
+
+Test both orders across four operations and32 FPSCR modes (256 ARM checks),
+negative zero, signaling/payload NaNs and split-bit false positives. Benchmark
+finite and exceptional32-operation chains separately and check fresh game
+loading, both tutorial lessons and first-minute FPS before retention.
