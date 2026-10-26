@@ -102,3 +102,24 @@ test('malformed code rejects compilation; registration and reset release cached 
   jit.reset(); assert.equal(removed,2); assert.equal(jit.lookup(1024),0);
   jit.register(0,1); assert.equal(jit.lookup(0),0); assert.equal(jit.stats.failed,1);
 });
+
+test('compiled-cache eviction clears native dispatch before table slots are reused', () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const events = [];
+  const jit = new globalThis.TouchHLETciJit(memory, () => 0,
+    () => { events.push('add'); return 7; }, () => events.push('remove'), 1,
+    { counter: 512, clear: () => events.push('clear') });
+  jit.names = names;
+  new Uint8Array(memory.buffer).set(exit(), 1024);
+  new Uint8Array(memory.buffer).set(exit(), 2048);
+  jit.register(1024, 10); assert.equal(jit.lookup(1024), 7);
+  new DataView(memory.buffer).setFloat64(512, 123, true);
+  assert.equal(jit.stats.hits, 123);
+  jit.liveModules = 4096; // Force the production retention limit.
+  jit.register(2048, 10); assert.equal(jit.lookup(2048), 7);
+  assert.deepEqual(events, ['add', 'clear', 'remove', 'add']);
+  assert.equal(jit.blocks.get(1024).fn, 0);
+  assert.equal(jit.lookup(1024), 7); // Eviction retains enough metadata to recompile.
+  jit.reset();
+  assert.equal(events.at(-3), 'clear');
+});

@@ -2,6 +2,7 @@
 // Run after the pinned Unicorn.js `python3 build.py arm` has applied its patches.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const source = `${root}target/unicorn.js`;
 for (const [cwd, expected] of [
@@ -23,7 +24,18 @@ for (const name of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.p
 // Normal Unicorn CPU exits use longjmp. Keep those exceptions within WASM
 // instead of throwing through JavaScript for every guest/HLE transition.
 const build = `${cwd}/build-wasm-eh`;
-execFileSync('emcmake', ['cmake', '-S', cwd, '-B', build,
+let cache = '';
+try { cache = readFileSync(`${build}/CMakeCache.txt`, 'utf8'); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
+// Reconfiguring this upstream project rewrites generated headers and rebuilds
+// every object. Preserve incremental builds only when the required config and
+// activated SDK match; CMake still detects changes to its own source inputs.
+const configured = process.env.EMSDK && cache.includes(`${process.env.EMSDK}/upstream/emscripten/cmake/`) && [
+  'CMAKE_BUILD_TYPE:STRING=Release', 'CMAKE_C_FLAGS:STRING=-sSUPPORT_LONGJMP=wasm',
+  'UNICORN_ARCH:STRING=arm', 'BUILD_SHARED_LIBS:BOOL=OFF',
+  'UNICORN_LEGACY_STATIC_ARCHIVE:BOOL=ON',
+].every(line => cache.split('\n').includes(line));
+if (!configured) execFileSync('emcmake', ['cmake', '-S', cwd, '-B', build,
   '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DUNICORN_ARCH=arm',
   '-DUNICORN_BUILD_TESTS=OFF', '-DUNICORN_INSTALL=OFF', '-DUNICORN_FUZZ=OFF',
   '-DUNICORN_LEGACY_STATIC_ARCHIVE=ON', '-DCMAKE_C_FLAGS=-sSUPPORT_LONGJMP=wasm'], { stdio: 'inherit' });

@@ -1214,3 +1214,20 @@ benchmark). Arithmetic-loop timings stayed similar: final JIT long-loop median
 Logs: `target/jit-{eager,lazy,batch}-final.log`. The first expanded batch-suite
 invocation had an incorrect relative require path in an ignored local runner
 (`target/jit-batch-node.log`); corrected rerun is `target/jit-batch-node-final.log`.
+
+Compiled-block dispatch cache: a bounded 8,192-entry C cache skips JavaScript
+lookups for compiled blocks; generated-code eviction clears it before recycling
+Wasm table slots, and retranslation clears its corresponding entry. The
+interpreter-only mode now also skips the unnecessary JS lookup. C counts actual
+compiled dispatches in shared memory. Unit tests exercise eviction ordering and
+recompilation; expanded CPU suites pass in Node and Chromium.
+`target/jit-dispatch-{emitter,node,browser}.log` retains results.
+
+Five-trial same-build medians (`target/jit-dispatch-benchmark.log`): tiny loop
+53.107 ms interpreter / 37.759 ms JIT, medium 78.961 / 36.161, long 293.475 /
+39.628, 50k SVC 132.505 / 133.732. Tiny blocks now improve rather than regress.
+Narrowing helper-call register transfers to the actual TCI ABI retains the
+interpreter helper path (not the rejected direct calls); expanded Node suite
+passes, with medians 53.667 / 33.344, 78.273 / 32.640, 292.512 / 35.568 and
+133.647 / 129.372 (`target/jit-helper-state-{node,benchmark}.log`).
+These are CPU microbenchmarks, not a game startup/FPS result.

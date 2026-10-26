@@ -1,6 +1,6 @@
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -478,18 +478,34 @@
+@@ -478,18 +478,48 @@
  uintptr_t tci_tb_ptr;
  #endif
  
@@ -12,18 +12,32 @@
 -    uintptr_t sp_value = (uintptr_t)(tcg_temps + CPU_TEMP_BUF_NLONGS);
 +#ifdef __EMSCRIPTEN__
 +#include <emscripten.h>
-+EM_JS(void, touchhle_tci_register, (uintptr_t ptr, unsigned size), {
++typedef struct { uintptr_t key, function; } TouchhleDispatch;
++static TouchhleDispatch touchhle_dispatch[8192];
++static double touchhle_compiled_executions;
++EMSCRIPTEN_KEEPALIVE void touchhle_tci_clear_dispatch(void)
++{
++    memset(touchhle_dispatch, 0, sizeof(touchhle_dispatch));
++}
++EM_JS(void, touchhle_tci_register_js, (uintptr_t ptr, unsigned size), {
 +    if (Module['tciJit']) Module['tciJit'].register(ptr, size);
 +});
++void touchhle_tci_register(uintptr_t ptr, unsigned size)
++{
++    touchhle_dispatch[(ptr >> 4) & 8191].key = 0;
++    touchhle_tci_register_js(ptr, size);
++}
 +EM_JS(void, touchhle_tci_reset, (), {
 +    if (Module['tciJit']) Module['tciJit'].reset();
 +});
-+EM_JS(void, touchhle_tci_init, (), {
++EM_JS(int, touchhle_tci_init, (uintptr_t counter), {
 +    if (!Module['tciJit'] && Module['enableTciJit']) {
 +        Module['tciJit'] = new globalThis.TouchHLETciJit(wasmMemory,
 +            wasmExports['touchhle_tci_step'], addFunction, removeFunction,
-+            Module['tciJitThreshold'] ?? 32);
++            Module['tciJitThreshold'] ?? 32,
++            {counter, clear: wasmExports['touchhle_tci_clear_dispatch']});
 +    }
++    return !!Module['tciJit'];
 +});
 +EM_JS(void, touchhle_tci_opcode, (unsigned op, const char *name), {
 +    if (Module['tciJit']) Module['tciJit'].names[op] = UTF8ToString(name);
@@ -46,7 +60,7 @@
      for (;;) {
          TCGOpcode opc = tb_ptr[0];
  #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-@@ -550,6 +566,7 @@
+@@ -550,6 +580,7 @@
              label = tci_read_label(&tb_ptr);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr = (uint8_t *)label;
@@ -54,7 +68,7 @@
              continue;
          case INDEX_op_setcond_i32:
              t0 = *tb_ptr++;
-@@ -752,7 +769,8 @@
+@@ -752,7 +783,8 @@
              if (tci_compare32(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -64,7 +78,7 @@
              }
              break;
  #if TCG_TARGET_REG_BITS == 32
-@@ -778,7 +796,8 @@
+@@ -778,7 +810,8 @@
              if (tci_compare64(tmp64, v64, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -74,7 +88,7 @@
              }
              break;
          case INDEX_op_mulu2_i32:
-@@ -1026,7 +1045,8 @@
+@@ -1026,7 +1059,8 @@
              if (tci_compare64(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -84,7 +98,7 @@
              }
              break;
  #if TCG_TARGET_HAS_ext8u_i64
-@@ -1123,7 +1143,7 @@
+@@ -1123,7 +1157,7 @@
              tb_ptr += sizeof(int32_t);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr += (int32_t)t0;
@@ -93,7 +107,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1273,7 +1293,47 @@
+@@ -1273,7 +1307,56 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -122,9 +136,9 @@
 +    regs[TCG_AREG0] = (tcg_target_ulong)env;
 +    regs[TCG_REG_CALL_STACK] = sp;
 +#ifdef __EMSCRIPTEN__
-+    static bool configured;
++    static bool configured, enabled;
 +    if (!configured) {
-+        touchhle_tci_init();
++        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions);
 +        for (unsigned i = 0; i < NB_OPS; ++i)
 +            touchhle_tci_opcode(i, env->uc->tcg_ctx->tcg_op_defs[i].name);
 +        configured = true;
@@ -133,10 +147,19 @@
 +    while (tb_ptr) {
 +#ifdef __EMSCRIPTEN__
 +        typedef uintptr_t (*Compiled)(CPUArchState *, tcg_target_ulong *, uintptr_t, uintptr_t *);
-+        Compiled compiled = (Compiled)touchhle_tci_lookup((uintptr_t)tb_ptr);
-+        if (compiled) {
-+            tb_ptr = (uint8_t *)compiled(env, regs, sp, &result);
-+            continue;
++        if (enabled) {
++            TouchhleDispatch *entry = &touchhle_dispatch[((uintptr_t)tb_ptr >> 4) & 8191];
++            if (entry->key != (uintptr_t)tb_ptr) {
++                uintptr_t function = touchhle_tci_lookup((uintptr_t)tb_ptr);
++                // JS compilation can evict functions and clear this table.
++                entry->key = function ? (uintptr_t)tb_ptr : 0;
++                entry->function = function;
++            }
++            if (entry->function && entry->key) {
++                ++touchhle_compiled_executions;
++                tb_ptr = (uint8_t *)((Compiled)entry->function)(env, regs, sp, &result);
++                continue;
++            }
 +        }
 +#endif
 +        tb_ptr = (uint8_t *)touchhle_tci_interpret(env, tb_ptr, regs, sp, &result, false);

@@ -27,8 +27,9 @@
     4: 0x49, 5: 0x4f, 10: 0x4c, 11: 0x4a, 12: 0x4d, 13: 0x4b };
 
   class TouchHLETciJit {
-    constructor(memory, step, addFunction, removeFunction, threshold = 32) {
+    constructor(memory, step, addFunction, removeFunction, threshold = 32, dispatch = null) {
       this.memory = memory;
+      this.dispatch = dispatch;
       this.step = step;
       this.addFunction = addFunction;
       this.removeFunction = removeFunction;
@@ -38,8 +39,12 @@
       this.liveBytes = 0;
       this.liveModules = 0;
       this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, registered: 0, liveBytes: 0 };
+      if (dispatch) Object.defineProperty(this.stats, 'hits', {
+        get: () => new DataView(this.memory.buffer).getFloat64(dispatch.counter, true),
+      });
     }
     reset() {
+      this.dispatch?.clear();
       for (const block of this.blocks.values()) if (block.fn) this.removeFunction(block.fn);
       this.blocks.clear();
       this.liveBytes = this.stats.liveBytes = 0;
@@ -58,13 +63,14 @@
     lookup(ptr) {
       const block = this.blocks.get(ptr);
       if (!block || block.failed) return 0;
-      if (block.fn) { this.stats.hits++; return block.fn; }
+      if (block.fn) { if (!this.dispatch) this.stats.hits++; return block.fn; }
       if (++block.count < this.threshold) return 0;
       const start = performance.now();
       try {
         const bytes = this.compile(ptr, block.size);
         if (bytes.length > 262144) throw new Error('Compiled block exceeds 256 KiB');
         if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 4096) {
+          this.dispatch?.clear();
           // Retain translation identities so an evicted hot block can recompile.
           for (const entry of this.blocks.values()) {
             if (entry.fn) this.removeFunction(entry.fn);
@@ -200,7 +206,12 @@
           // Preserve QEMU memory/exception/VFP semantics via the same interpreter
           // operation. Helpers cannot yield; exceptions propagate through Wasm.
           let inputs, outputs;
-          if (name === 'qemu_ld_i32') { const dst = byte(); inputs = [byte()]; outputs = [dst]; }
+          if (name === 'call') {
+            inputs = [0,1,2,3,5,6,7,8,9,10,11,12];
+            const functionReg = byte();
+            if (functionReg !== 255 && !inputs.includes(functionReg)) inputs.push(functionReg);
+            outputs = [0,1];
+          } else if (name === 'qemu_ld_i32') { const dst = byte(); inputs = [byte()]; outputs = [dst]; }
           else if (name === 'qemu_ld_i64') { outputs = [byte(), byte()]; inputs = [byte()]; }
           else if (name === 'qemu_st_i32') { inputs = [byte(), byte()]; outputs = []; }
           else if (name === 'qemu_st_i64') { inputs = [byte(), byte(), byte()]; outputs = []; }
