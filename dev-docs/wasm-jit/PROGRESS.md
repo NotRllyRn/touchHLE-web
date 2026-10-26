@@ -291,3 +291,8 @@ CPU checking comparison shows SVC104.7/118.6/104.0 ms unchecked/checked/unchecke
 retain production checks. Corrected diagnostic assertion level to1. Benchmark
 option CPU_CHECKS=1 passes both backend result checks, JS26 and formatting.
 Next measure narrow synchronous TCI bridge exclusions; M4/M5 remain open.
+
+Narrow synchronous TCI+four float32 helper exclusions yield modest isolated
+memory/FP improvements. Strict Node/Chromium CPU/fibers, JS26, nine graphics
+fixtures twice, Web Audio and formatting pass. Assertions unchanged. Full runtime
+rebuilt; fresh clean game measurement and both lessons pending before retention.

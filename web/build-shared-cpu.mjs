@@ -23,7 +23,7 @@ execFileSync('emcc', ['web/fixtures/cpu/main.c', 'web/fixtures/cpu/adapter.c', '
   '-sSUPPORT_LONGJMP=wasm',
   '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
   '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
-  '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]',
+  '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm","touchhle_tci_call","touchhle_tci_step","touchhle_tci_interpret","float32_add_arm","float32_sub_arm","float32_mul_arm","float32_div_arm"]',
   '-sMODULARIZE=1', '-sEXPORT_NAME=createSharedCpuChecks', '-sENVIRONMENT=web,worker,node',
   '-o', 'web/dist/shared-cpu-checks.js'], { cwd: root, stdio: 'inherit' });
 await writeFile(`${root}web/dist/shared-cpu-worker.js`, `// SPDX-License-Identifier: MPL-2.0

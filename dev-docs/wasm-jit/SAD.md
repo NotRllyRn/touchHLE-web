@@ -130,3 +130,14 @@ functions until the new module fits within75% of the unchanged8192-module/
 tracks compiled modules; JS lookups refresh recency, while native dispatch hits
 bypass that bookkeeping. This is approximate recency, not a strict LRU policy.
 Reset and re-registration remove retained entries and account for emitted bytes.
+
+## Synchronous helper instrumentation
+
+The browser CPU adapter's callbacks only stop or report errors; HLE dispatch and
+fiber suspension occur after CPU return. Exclude the TCI call/step/interpreter
+bridges from Asyncify along with the existing dispatcher. Four pure float32
+arithmetic entry points also use internal synchronous function pointers and need
+no suspension state. Use exact names, retain production assertions/stack checks,
+and keep Rust/HLE/fibers instrumented. CPU/fiber, fault, floating-point and game
+regressions gate this boundary; synthetic improvements alone do not establish
+real-time game acceptance. Native execution is unchanged.

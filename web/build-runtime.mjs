@@ -36,8 +36,9 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
   '-sALLOW_TABLE_GROWTH=1',
   '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
   // CPU hooks only count, stop, or report faults. They never suspend; Rust
-  // dispatches HLE calls after the interpreter returns. Keep fibers instrumented.
-  '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]',
+  // dispatches HLE calls after the interpreter returns. TCI bridges and these
+  // pure softfloat operations cannot suspend either. Keep fibers instrumented.
+  '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm","touchhle_tci_call","touchhle_tci_step","touchhle_tci_interpret","float32_add_arm","float32_sub_arm","float32_mul_arm","float32_div_arm"]',
   '-sALLOW_MEMORY_GROWTH=1', '-sMAXIMUM_MEMORY=1073741824', '-sSTACK_SIZE=2097152',
   '-sUSE_SDL=2', '-sOFFSCREENCANVAS_SUPPORT=1', '-sLEGACY_GL_EMULATION=1', '-sGL_UNSAFE_OPTS=0',
   '-sMAX_WEBGL_VERSION=2',

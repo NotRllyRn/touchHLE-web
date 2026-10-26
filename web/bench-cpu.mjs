@@ -9,7 +9,7 @@ execFileSync('emcc', ['web/fixtures/cpu/benchmark.c', process.env.CPU_ADAPTER ||
   '-Itarget/unicorn.js/unicorn/include', '-O2', '-sSUPPORT_LONGJMP=wasm',
   '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
   '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
-  ...(process.env.CPU_ASYNCIFY === '1' ? ['-sASYNCIFY=1', '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]'] : []),
+  ...(process.env.CPU_ASYNCIFY === '1' ? ['-sASYNCIFY=1', '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm","touchhle_tci_call","touchhle_tci_step","touchhle_tci_interpret","float32_add_arm","float32_sub_arm","float32_mul_arm","float32_div_arm"]'] : []),
   ...(process.env.CPU_CHECKS === '1' ? ['-sASSERTIONS=1', '-sSTACK_OVERFLOW_CHECK=2'] : []),
   '-sALLOW_MEMORY_GROWTH=1', '-sMODULARIZE=1', '-sENVIRONMENT=node',
   '-o', 'target/browser-cpu/benchmark.js'], { cwd: root, stdio: 'inherit' });

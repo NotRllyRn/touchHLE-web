@@ -2312,3 +2312,37 @@ zero JIT failures. `target/jit-runtime-checks-comparison.log`. Checks contribute
 to some microbenchmarks but do not explain the game gap; retain production flags.
 Next local experiment excludes only synchronous TCI call/step/interpreter bridges
 in addition to the existing dispatcher, retaining checks and all HLE/fiber code.
+
+### Synchronous CPU instrumentation experiment (2026-10-26)
+
+With production checks retained, excluding touchhle_tci_call, touchhle_tci_step
+and touchhle_tci_interpret in addition to the existing dispatcher gives checked/
+bridge/checked medians (ms): code-page memory53.218/47.856/52.484, SVC120.427/
+121.464/119.220, library-memory5.810/6.209/5.810. Float-normal-add23.956/
+21.561/21.933 shows warmup variation. Local builds only at this point.
+`target/jit-sync-bridge-{build,comparison}.log`.
+
+Additional pure float32_add/sub/mul/div exclusions: bridge/bridge+float/bridge
+medians normal-add22.244/20.810/22.249, normal-multiply20.556/17.054/18.890,
+zero-add22.872/20.695/21.984, cancellation21.693/19.275/21.065; code-page
+memory49.173/48.954/47.498 and SVC119.951/122.714/118.455. Five trials/case,
+Node22, no competing workload; all result checks pass, zero compiler failures.
+`target/jit-sync-float-{build,comparison}.log`. These are microbenchmarks only.
+
+Candidate applies that exact seven-function addition consistently to full runtime,
+strict CPU/fiber fixture and CPU benchmark. No wildcard exclusions, change to
+assertion levels, or instruction semantics. Adapter CPU hooks only stop/report;
+HLE dispatch occurs after return. Softfloat's internal function pointers select
+pure numerical operations, which cannot suspend. Rust/HLE/fibers remain under
+Asyncify. Full CPU/fiber and runtime regressions/build now running; do not count
+candidate as accepted until real-game/yield checks finish.
+
+Candidate full runtime build succeeds. Strict actual CPU/context/FP fingerprints/
+9000-block cache/fiber checks pass in Node and Chromium. JS26, formatting and
+syntax/diff checks pass. All nine forced-JIT graphics fixtures each pass twice;
+actual Web Audio passes. Logs `target/jit-sync-{cpu-build,cpu-node,cpu-browser,
+runtime-build,web-build,js,audio}.log` and `jit-sync-TESTNAME.log` (fixture names
+MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED,
+POINT_PARAMETERS, PRESENT_BUFFERS). Fresh clean game started after all checks;
+`target/jit-sync-helpers-game.log`, screenshots `target/browser-jit-sync-helpers/`.
+No timing or game acceptance claim for this candidate yet.
