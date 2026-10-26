@@ -151,6 +151,29 @@ int main(void) {
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
+  // Two distinct hot blocks: self-loop optimization cannot bypass dispatch.
+  for (unsigned trial = 0; trial < 5; ++trial) {
+    uint32_t *code = calloc(1, 8192);
+    code[0] = 0xe2800001; code[1] = 0xea00000d; // add r0,#1; b second
+    code[16] = 0xe2511001; code[17] = 0x1affffed; // subs r1,#1; bne first
+    code[18] = 0xef000042;
+    Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
+    uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
+    regs[1] = 1000000; regs[15] = 0x1000;
+    double start = emscripten_get_now();
+    int result;
+    unsigned slices = 0;
+    do {
+      assert(++slices <= 1000);
+      uint64_t ticks = 100000000;
+      result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
+    } while (result == -1);
+    double ms = emscripten_get_now() - start;
+    assert(result == 0x42 && regs[0] == 1000000 && regs[1] == 0);
+    printf("BENCH {\"kind\":\"linked-blocks\",\"trial\":%u,\"instructions\":4000001,\"ms\":%.3f}\n", trial, ms);
+    touchHLE_DynarmicWrapper_delete(cpu);
+    free(code);
+  }
   for (unsigned trial = 0; trial < 5; ++trial) {
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xe2800001; code[1] = 0xef000042; code[2] = 0xeafffffc;

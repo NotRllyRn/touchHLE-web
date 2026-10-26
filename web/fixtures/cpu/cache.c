@@ -103,6 +103,23 @@ void cache_checks(void) {
   reg(cpu, UC_ARM_REG_R2, 2);
   assert(uc_emu_start(cpu, 0x2000, 0x200c, 0, 0) == UC_ERR_OK);
   assert(r0(cpu) == 42);
+  // Warm two linked blocks, then let the second overwrite the first. Direct
+  // compiled transfers must observe Unicorn unlinking/invalidation immediately.
+  const uint32_t chain_a[] = {0xe3a03001, 0xea00003d}; // mov r3,#1; b second
+  const uint32_t chain_b[] = {0xe5810000, 0xe2522001, 0x1affffbc};
+  assert(uc_mem_write(cpu, 0x2100, chain_a, sizeof(chain_a)) == UC_ERR_OK);
+  assert(uc_mem_write(cpu, 0x2200, chain_b, sizeof(chain_b)) == UC_ERR_OK);
+  assert(uc_ctl_flush_tb(cpu) == UC_ERR_OK);
+  for (unsigned i = 0; i < 64; ++i) {
+    reg(cpu, UC_ARM_REG_R0, 0xe3a0302a); reg(cpu, UC_ARM_REG_R1, 0x3000);
+    reg(cpu, UC_ARM_REG_R2, 4);
+    assert(uc_emu_start(cpu, 0x2100, 0x220c, 0, 0) == UC_ERR_OK);
+  }
+  reg(cpu, UC_ARM_REG_R1, 0x2100); reg(cpu, UC_ARM_REG_R2, 2);
+  assert(uc_emu_start(cpu, 0x2100, 0x220c, 0, 0) == UC_ERR_OK);
+  uint32_t r3;
+  assert(uc_reg_read(cpu, UC_ARM_REG_R3, &r3) == UC_ERR_OK);
+  assert(r3 == 42);
   assert(uc_close(cpu) == UC_ERR_OK);
   // Exercise production module-capacity eviction through the native dispatcher.
   assert(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &cpu) == UC_ERR_OK);

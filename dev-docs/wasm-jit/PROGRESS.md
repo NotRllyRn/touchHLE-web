@@ -302,3 +302,14 @@ Synchronous-helper f4ae8e6e clean game: menu162 s, training238 to Play457 =219 s
 532/762 s, actual touch placement verified. Retain after full regressions; stop
 via UI. Next investigate compiled dispatch cost; startup/real-time and device
 acceptance remain open. Source and exact evidence committed/pushed incrementally.
+
+Direct tail-transfer experiment rejected: per-block table imports exhaust Node
+heap near4 GiB under cache stress. A single shared dispatcher passes actual CPU/
+fiber/cache checks (~467 MiB peak RSS), but linked ARM loop149/135/149 ms new/
+old/new regresses ~10%. Production compiler/metadata restored. Retain only new
+linked-loop benchmark and linked-code rewrite regression; baseline validation
+running. Next consider an ordinary-call dispatch loop, subject to measurement.
+
+Retained linked-code regression passes baseline Node/Chromium CPU/fibers, JS26
+and formatting. Negative performance/resource evidence documented; no tail-call
+runtime implementation retained. Next dispatch experiment remains open.

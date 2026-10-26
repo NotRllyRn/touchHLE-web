@@ -2364,3 +2364,60 @@ passing regressions, without claiming a material game speedup. M4/M5 remain open
 Next: profile compiled dispatch/transition cost and compare an isolated reduction
 before another runtime change. Software GPU limits remain; hardware/mobile,
 input p95, wall-time simulation and three-trial final acceptance are outstanding.
+
+### Direct compiled transfers experiment (2026-10-26)
+
+Prototype feature-detects Wasm tail calls and preserves ordinary dispatcher
+fallback when unavailable. It rereads mutable goto links and C-provided dispatch
+cache layout before transfer, retaining all target budget/exit checks and
+register state. New JS test runs nearly two million transfers and checks mutable
+links, memory growth, cache misses/collisions, empty functions, table reuse after
+clear and forced fallback. JS27 pass. Real ARM two-block benchmark checks results.
+
+Rejected first design: each block imported the full runtime Wasm table. The
+9000-block cache regression exhausted Node's default heap (~4059 MiB, exit134),
+`target/jit-tail-calls-node.log`. No production build or game used this version;
+it is not committed. Interpreter half passed; JIT half did not complete.
+
+Revised prototype imports the runtime table once in a shared Wasm dispatcher.
+Each block tail-calls that small function; it verifies cache key/function, counts
+the transfer and tail-calls the target, or returns a cache miss to C. No stack
+accumulation, table import per block, instruction semantics change, or new
+browser requirement. JS27 pass again (`jit-tail-dispatch-js.log`). Actual CPU
+regression now also warms two linked blocks and lets one overwrite the other
+through a guest store before returning. Full actual tests and isolated timings
+pending; no retention/performance acceptance claim yet.
+
+Revised shared-table dispatcher passes actual Node CPU/fiber/cache checks,
+including linked guest-code overwrite:46.332 s, peak child RSS478216 KiB, exit0.
+`target/jit-tail-dispatch-node.log`. First resource wrapper attempt could not run
+because /usr/bin/time is absent; the recorded successful run uses Python
+resource.getrusage(RUSAGE_CHILDREN), without increasing Node's heap limit.
+
+Reject the revised tail-call design on isolated performance evidence. Same-Wasm
+new/old/new five-trial medians (ms): linked-blocks149.331/135.204/148.611;
+code-page memory48.234/47.331/48.648; library-memory5.728/5.626/5.868;
+SVC121.066/121.180/131.192. Logs `target/jit-tail-dispatch-comparison.log`.
+The two-block loop performs1,000,000 iterations,4,000,001 guest instructions;
+all results pass. No competing workload. Tail calls were enabled in both new
+runs. This fixes memory growth but regresses the intended dispatch workload
+~10%; do not ship it. The prototype and C metadata changes are removed.
+
+A subsequent source review caught a zero-target sentinel edge case in the
+unretained dispatcher. A guard and regression were prepared after the comparison,
+but no favorable benchmark or production claim is based on that unmeasured edit.
+Both rejected compiler copies remain local in target only. Retain just the ARM
+linked-block benchmark and the warmed linked-code rewrite regression. Rebuilding
+and checking those against the unchanged production compiler now. No new game
+run is required to validate a production optimization, since none is retained.
+Next investigate a single generated dispatch loop with ordinary calls, avoiding
+both per-block table imports and the extra tail-transfer boundary, only if its
+measured gain justifies integration. M4/M5 and the original goal remain open.
+
+Final retained test additions pass actual Node and Chromium CPU/cache/fiber
+checks with the unchanged production compiler and restored metadata. JS26,
+cargo fmt --check and git diff --check pass. Logs
+`target/jit-linked-regression-{build,node,browser,js}.log`. The new benchmark
+already passed interpreter/JIT guest assertions in the exploratory build;
+its same-Wasm baseline comparison verifies the existing compiler. No production
+runtime code change remains from this experiment.
