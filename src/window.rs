@@ -233,11 +233,11 @@ pub struct Window {
     splash_image: Option<Image>,
     device_family: DeviceFamily,
     device_orientation: DeviceOrientation,
-    controller_ctx: sdl2::GameControllerSubsystem,
+    controller_ctx: Option<sdl2::GameControllerSubsystem>,
     controllers: Vec<sdl2::controller::GameController>,
     dpad_state: DpadState,
     stick_active: bool,
-    _sensor_ctx: sdl2::SensorSubsystem,
+    _sensor_ctx: Option<sdl2::SensorSubsystem>,
     accelerometer: Option<sdl2::sensor::Sensor>,
     virtual_cursor_last: Option<(f32, f32, bool, bool)>,
     virtual_cursor_last_unsticky: Option<(f32, f32, Instant)>,
@@ -344,22 +344,29 @@ impl Window {
 
         let event_pump = sdl_ctx.event_pump().unwrap();
 
-        let controller_ctx = sdl_ctx.game_controller().unwrap();
+        #[cfg(not(target_os = "emscripten"))]
+        let controller_ctx = Some(sdl_ctx.game_controller().unwrap());
+        #[cfg(target_os = "emscripten")]
+        let controller_ctx = sdl_ctx.game_controller().ok();
 
-        let sensor_ctx = sdl_ctx.sensor().unwrap();
+        #[cfg(not(target_os = "emscripten"))]
+        let sensor_ctx = Some(sdl_ctx.sensor().unwrap());
+        #[cfg(target_os = "emscripten")]
+        let sensor_ctx = sdl_ctx.sensor().ok();
         let mut accelerometer: Option<sdl2::sensor::Sensor> = None;
-        if let Ok(num_sensors) = sensor_ctx.num_sensors() {
-            for sensor_idx in 0..num_sensors {
-                if let Ok(sensor) = sensor_ctx.open(sensor_idx) {
-                    if sensor.sensor_type() == sdl2::sensor::SensorType::Accelerometer {
-                        log!("Accelerometer detected: {}.", sensor.name());
-                        accelerometer = Some(sensor);
-                        break;
+        if let Some(sensor_ctx) = sensor_ctx.as_ref() {
+            if let Ok(num_sensors) = sensor_ctx.num_sensors() {
+                for sensor_idx in 0..num_sensors {
+                    if let Ok(sensor) = sensor_ctx.open(sensor_idx) {
+                        if sensor.sensor_type() == sdl2::sensor::SensorType::Accelerometer {
+                            log!("Accelerometer detected: {}.", sensor.name());
+                            accelerometer = Some(sensor);
+                            break;
+                        }
                     }
                 }
             }
         }
-
         #[cfg(target_os = "macos")]
         let max_height = window.size().1;
 
@@ -877,7 +884,10 @@ impl Window {
     }
 
     fn controller_added(&mut self, joystick_idx: u32) {
-        let Ok(controller) = self.controller_ctx.open(joystick_idx) else {
+        let Some(ctx) = self.controller_ctx.as_ref() else {
+            return;
+        };
+        let Ok(controller) = ctx.open(joystick_idx) else {
             log!("Warning: A new controller was connected, but it couldn't be accessed!");
             return;
         };
@@ -1153,8 +1163,18 @@ impl Window {
                 attr.set_context_profile(sdl2::video::GLProfile::GLES);
             }
             GLVersion::GL21Compat => {
-                attr.set_context_version(2, 1);
-                attr.set_context_profile(sdl2::video::GLProfile::Compatibility);
+                #[cfg(not(target_os = "emscripten"))]
+                {
+                    attr.set_context_version(2, 1);
+                    attr.set_context_profile(sdl2::video::GLProfile::Compatibility);
+                }
+                #[cfg(target_os = "emscripten")]
+                {
+                    // Emscripten translates the existing fixed-function calls
+                    // over WebGL2 (ES3); RGBA8 renderbuffers need WebGL2.
+                    attr.set_context_version(3, 0);
+                    attr.set_context_profile(sdl2::video::GLProfile::GLES);
+                }
             }
         }
 

@@ -12,6 +12,22 @@ fn rerun_if_changed(path: &Path) {
 }
 
 pub fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "emscripten" {
+        let unicorn = std::env::var("TOUCHHLE_UNICORN_SOURCE")
+            .expect("Set TOUCHHLE_UNICORN_SOURCE to the pinned, built Unicorn.js source directory");
+        cc::Build::new()
+            .file("src/web/cpu.c")
+            .file("src/web/fibers.c")
+            .flag("-sUSE_SDL=2")
+            .include(format!("{unicorn}/unicorn/include"))
+            .compile("touchhle_web_adapters");
+        println!("cargo:rustc-link-search=native={unicorn}/unicorn/build-wasm-eh");
+        println!("cargo:rustc-link-lib=static=unicorn");
+        println!("cargo:rerun-if-changed={unicorn}/unicorn/build-wasm-eh/libunicorn.a");
+        println!("cargo:rerun-if-changed=src/web/cpu.c");
+        println!("cargo:rerun-if-changed=src/web/fibers.c");
+        println!("cargo:rerun-if-env-changed=TOUCHHLE_UNICORN_SOURCE");
+    }
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let package_root = Path::new(env!("CARGO_MANIFEST_DIR"));
 

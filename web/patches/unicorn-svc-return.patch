@@ -1,0 +1,36 @@
+diff --git a/qemu/target/arm/op_helper.c b/qemu/target/arm/op_helper.c
+index a9cbc79..29ec00f 100644
+--- a/qemu/target/arm/op_helper.c
++++ b/qemu/target/arm/op_helper.c
+@@ -351,6 +351,14 @@ void HELPER(exception_internal)(CPUARMState *env, uint32_t excp)
+ void HELPER(exception_with_syndrome)(CPUARMState *env, uint32_t excp,
+                                      uint32_t syndrome, uint32_t target_el)
+ {
++#ifdef __EMSCRIPTEN__
++    /* touchHLE: an SVC ends its translated block. Return through that block
++     * boundary instead of throwing a WASM exception on every HLE call. */
++    if (excp == EXCP_SWI) {
++        cpu_exit(do_raise_exception(env, excp, syndrome, target_el));
++        return;
++    }
++#endif
+     raise_exception(env, excp, syndrome, target_el);
+ }
+ 
+diff --git a/qemu/target/arm/translate.h b/qemu/target/arm/translate.h
+index 62ea7a5..9475d97 100644
+--- a/qemu/target/arm/translate.h
++++ b/qemu/target/arm/translate.h
+@@ -249,6 +249,12 @@ static inline void gen_exception(TCGContext *tcg_ctx, int excp, uint32_t syndrom
+     tcg_temp_free_i32(tcg_ctx, tcg_el);
+     tcg_temp_free_i32(tcg_ctx, tcg_syn);
+     tcg_temp_free_i32(tcg_ctx, tcg_excp);
++#ifdef __EMSCRIPTEN__
++    if (excp == EXCP_SWI) {
++        /* The SVC helper records the exception and requests a CPU exit. */
++        tcg_gen_exit_tb(tcg_ctx, NULL, 0);
++    }
++#endif
+ }
+ 
+ /* Generate an architectural singlestep exception */

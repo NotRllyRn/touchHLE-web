@@ -1,0 +1,36 @@
+--- a/src/lib/libglemu.js
++++ b/src/lib/libglemu.js
+@@ -1315,25 +1315,15 @@
+         }
+         var lines = this.env.genPassLines(passOutputVar, passInputVar, texUnitID).join('\n');
+ 
++        // The exact sample expression is already known. A regexp stopping at
++        // the first ')' truncates texture-matrix expressions in COMBINE mode.
+         var texLoadLines = '';
+-        var texLoadRegex = /(texture.*?\(.*?\))/g;
+-        var loadCounter = 0;
+-        var load;
+-
+-        // As an optimization, merge duplicate identical texture loads to one var.
+-        while (load = texLoadRegex.exec(lines)) {
+-          var texLoadExpr = load[1];
+-          var secondOccurrence = lines.slice(load.index+1).indexOf(texLoadExpr);
+-          if (secondOccurrence != -1) { // And also has a second occurrence of same load expression..
+-            // Create new var to store the common load.
+-            var prefix = TEXENVJIT_NAMESPACE_PREFIX + 'env' + texUnitID + "_";
+-            var texLoadVar = prefix + 'texload' + loadCounter++;
+-            var texLoadLine = 'vec4 ' + texLoadVar + ' = ' + texLoadExpr + ';\n';
+-            texLoadLines += texLoadLine + '\n'; // Store the generated texture load statements in a temp string to not confuse regex search in progress.
+-            lines = lines.split(texLoadExpr).join(texLoadVar);
+-            // Reset regex search, since we modified the string.
+-            texLoadRegex = /(texture.*\(.*\))/g;
+-          }
++        var texLoadExpr = genTexUnitSampleExpr(texUnitID);
++        var first = lines.indexOf(texLoadExpr);
++        if (first != -1 && lines.indexOf(texLoadExpr, first + texLoadExpr.length) != -1) {
++          var texLoadVar = TEXENVJIT_NAMESPACE_PREFIX + 'env' + texUnitID + '_texload0';
++          texLoadLines = 'vec4 ' + texLoadVar + ' = ' + texLoadExpr + ';\n';
++          lines = lines.split(texLoadExpr).join(texLoadVar);
+         }
+         return [texLoadLines + lines];
+       }

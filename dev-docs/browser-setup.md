@@ -26,14 +26,15 @@ cargo test --locked -p touchhle-browser
 cargo build --locked -p touchhle-browser --target wasm32-unknown-unknown --release
 cd web
 npm ci --ignore-scripts
-npm test
 npm run build
+npm test
 python3 -m http.server 8765 --bind 127.0.0.1 --directory dist
 ```
 
-Open http://127.0.0.1:8765 and run the CPU checks. The page currently tests only
-the candidate ARM WASM backend. It does not have an IPA picker or game runtime.
-The Rust parser's WASM output is separate and not wired into this page yet.
+Open http://127.0.0.1:8765 and run the CPU checks or validate a local IPA.
+The picker runs the Rust parser in a disposable worker. Validation is separate from execution. Build the HLE runtime using the
+Run the actual HLE instructions in ../web/README.md to enable Run IPA. `npm run build` now builds and
+copies the parser WASM, so Rust and the wasm32-unknown-unknown target are required.
 
 For native regression tests, first follow [building.md](building.md), including
 C/C++ compilers, CMake, Boost and initialized submodules. On the original macOS
@@ -56,8 +57,7 @@ source target/emsdk/emsdk_env.sh
 rustup target add wasm32-unknown-emscripten
 ```
 
-The SDK is ignored. No shell startup edits are necessary. The fiber experiment
-has not been implemented or validated yet.
+The SDK is ignored. No shell startup edits are necessary. Run the mixed Rust/C fiber experiment as described in `web/README.md`.
 
 ## What is deliberately not published
 
@@ -66,9 +66,9 @@ node_modules, compiled binaries and dist. Obtain owned test IPAs separately.
 The prior native TinkerBox level sweep is not portable proof of browser support.
 See web/README.md before publishing compiled Unicorn-containing artifacts.
 
-## Exact next task when development resumes
+## Runtime integration
 
-Review src/browser, then test its raw WASM ABI in Node and a browser worker.
-Wire bounded local file selection to it and test owned IPA preflight. Preserve
-the explicit validated-not-executed status. Then continue M1's mixed-language
-CPU, fiber and memory experiments; do not jump from a picker to a gameplay claim.
+The source-built interpreter now shares Rust guest mappings and runs the actual
+HLE scheduler using Emscripten fibers. An original ARM IPA passes the real loader
+and libc in Chromium. TinkerBox startup and graphics remain under investigation;
+see browser.md for exact results and limitations.

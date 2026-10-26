@@ -49,6 +49,8 @@ mod objc;
 mod options;
 mod paths;
 mod stack;
+#[cfg(target_os = "emscripten")]
+mod web_coroutine;
 mod window;
 
 // Environment is used very frequently used and used to be in this module, so
@@ -367,4 +369,18 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
     };
     env.run();
     Ok(())
+}
+
+/// Browser worker entry point. The shell places a locally selected IPA in MEMFS.
+#[cfg(target_os = "emscripten")]
+#[no_mangle]
+pub extern "C" fn touchhle_web_start(headless: bool) {
+    let mut args = vec!["touchHLE".to_owned(), "/app.ipa".to_owned()];
+    if headless {
+        args.push("--headless".to_owned());
+    }
+    args.push("--gles1=gles1_on_gl2".to_owned());
+    if let Err(error) = main(args.into_iter()) {
+        panic!("Browser launch failed: {error}");
+    }
 }

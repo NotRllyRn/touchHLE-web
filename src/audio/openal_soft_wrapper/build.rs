@@ -26,6 +26,10 @@ fn link_framework(framework: &str) {
 
 fn main() {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");
+    if os == "emscripten" {
+        // Emscripten supplies the OpenAL implementation backed by Web Audio.
+        return;
+    }
     if cfg!(feature = "static") {
         let package_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let workspace_root = package_root.join("../../..");

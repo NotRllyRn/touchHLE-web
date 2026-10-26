@@ -29,6 +29,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::libc::pthread::cond::pthread_cond_t;
 use crate::libc::stdio::FILE;
+#[cfg(target_os = "emscripten")]
+use crate::web_coroutine as corosensei;
 use crate::window::DeviceFamily;
 use corosensei::{Coroutine, Yielder};
 pub use mutex::{MutexId, MutexType, PTHREAD_MUTEX_DEFAULT};
@@ -1338,6 +1340,13 @@ impl Environment {
             self.gdb_server = Some(gdb_server);
         }
         loop {
+            #[cfg(target_os = "emscripten")]
+            unsafe {
+                extern "C" {
+                    fn emscripten_sleep(ms: u32);
+                }
+                emscripten_sleep(0);
+            }
             if self.threads[self.current_thread].state == ThreadState::Stepping {
                 self.remaining_ticks = None;
             } else {

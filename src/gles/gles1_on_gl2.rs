@@ -31,6 +31,63 @@ use crate::window::{GLContext, GLVersion, Window};
 use std::collections::HashSet;
 use std::ffi::CStr;
 
+#[cfg(not(target_os = "emscripten"))]
+use gl21::{
+    Fogf as fog_f, Fogfv as fog_fv, Fogi as fog_i, Fogiv as fog_iv, Lightf as light_f,
+    Lightfv as light_fv, MapBuffer as map_buffer, UnmapBuffer as unmap_buffer,
+};
+#[cfg(not(target_os = "emscripten"))]
+use gl21::{TexEnvf as tex_env_f, TexEnvfv as tex_env_fv, TexEnvi as tex_env_i};
+#[cfg(target_os = "emscripten")]
+mod browser_legacy {
+    use super::*;
+    extern "C" {
+        #[link_name = "touchhle_web_light_f"]
+        pub fn light_f(light: GLenum, pname: GLenum, param: GLfloat);
+        #[link_name = "touchhle_web_light_fv"]
+        pub fn light_fv(light: GLenum, pname: GLenum, params: *const GLfloat);
+        #[link_name = "touchhle_web_fog_f"]
+        pub fn fog_f(pname: GLenum, param: GLfloat);
+        #[link_name = "touchhle_web_fog_i"]
+        pub fn fog_i(pname: GLenum, param: GLint);
+        #[link_name = "touchhle_web_fog_fv"]
+        pub fn fog_fv(pname: GLenum, params: *const GLfloat);
+        #[link_name = "touchhle_web_fog_iv"]
+        pub fn fog_iv(pname: GLenum, params: *const GLint);
+        #[link_name = "touchhle_web_map_buffer"]
+        pub fn map_buffer(target: GLenum, access: GLenum) -> *mut GLvoid;
+        #[link_name = "touchhle_web_unmap_buffer"]
+        pub fn unmap_buffer(target: GLenum) -> GLboolean;
+        #[link_name = "touchhle_web_tex_env_f"]
+        pub fn tex_env_f(target: GLenum, pname: GLenum, param: GLfloat);
+        #[link_name = "touchhle_web_tex_env_i"]
+        pub fn tex_env_i(target: GLenum, pname: GLenum, param: GLint);
+        #[link_name = "touchhle_web_tex_env_fv"]
+        pub fn tex_env_fv(target: GLenum, pname: GLenum, params: *const GLfloat);
+    }
+}
+#[cfg(target_os = "emscripten")]
+use browser_legacy::{
+    fog_f, fog_fv, fog_i, fog_iv, light_f, light_fv, map_buffer, tex_env_f, tex_env_fv, tex_env_i,
+    unmap_buffer,
+};
+
+// Desktop GL has an integer-vector entry point that Emscripten's legacy
+// interface omits. Preserve vector color normalization and scalar enum values.
+unsafe fn tex_env_iv(target: GLenum, pname: GLenum, params: *const GLint) {
+    #[cfg(not(target_os = "emscripten"))]
+    gl21::TexEnviv(target, pname, params);
+    #[cfg(target_os = "emscripten")]
+    if target == gl21::TEXTURE_ENV && pname == gl21::TEXTURE_ENV_COLOR {
+        let color: [GLfloat; 4] = std::array::from_fn(|i| {
+            (params.add(i).read() as f64 / i32::MAX as f64).max(-1.0) as f32
+        });
+        tex_env_fv(target, pname, color.as_ptr());
+    } else {
+        tex_env_i(target, pname, params.read());
+    }
+}
+
 /// List of capabilities shared by OpenGL ES 1.1 and OpenGL 2.1.
 ///
 /// Note: There can be arbitrarily many lights or clip planes, depending on
@@ -544,7 +601,7 @@ impl GLES1OnGL2<'_> {
             });
 
             let pointer = if buffer_binding != 0 {
-                let mapped_buffer = gl21::MapBuffer(gl21::ARRAY_BUFFER, gl21::READ_ONLY);
+                let mapped_buffer = map_buffer(gl21::ARRAY_BUFFER, gl21::READ_ONLY);
                 assert!(!mapped_buffer.is_null());
                 // in this case the old_pointer is actually an offest!
                 mapped_buffer.add(old_pointer as usize)
@@ -585,7 +642,7 @@ impl GLES1OnGL2<'_> {
             }
 
             if buffer_binding != 0 {
-                gl21::UnmapBuffer(gl21::ARRAY_BUFFER);
+                unmap_buffer(gl21::ARRAY_BUFFER);
                 gl21::BindBuffer(gl21::ARRAY_BUFFER, 0);
             }
 
@@ -704,6 +761,13 @@ impl GLES for GLES1OnGL2<'_> {
         assert!(
             CAPABILITIES.contains(&cap) || ARRAYS.iter().any(|&ArrayInfo { name, .. }| name == cap)
         );
+        #[cfg(target_os = "emscripten")]
+        if cap == gl21::TEXTURE_2D {
+            extern "C" {
+                fn touchhle_web_texture_2d_enabled() -> GLboolean;
+            }
+            return touchhle_web_texture_2d_enabled();
+        }
         gl21::IsEnabled(cap)
     }
     unsafe fn Disable(&mut self, cap: GLenum) {
@@ -746,6 +810,13 @@ impl GLES for GLES1OnGL2<'_> {
         gl21::DisableClientState(array);
     }
     unsafe fn GetBooleanv(&mut self, pname: GLenum, params: *mut GLboolean) {
+        #[cfg(target_os = "emscripten")]
+        if CAPABILITIES.contains(&pname) {
+            // Emscripten's legacy GetBooleanv treats TEXTURE_2D as a client
+            // array and aborts. IsEnabled reads its emulated server state.
+            *params = self.IsEnabled(pname);
+            return;
+        }
         let (type_, count) = GET_PARAMS.get_type_info(pname);
         match type_ {
             ParamType::Boolean => {
@@ -782,17 +853,38 @@ impl GLES for GLES1OnGL2<'_> {
         let allowed_float = type_ == ParamType::Float && pname == gl21::POINT_SIZE_MAX;
         assert!(type_ == ParamType::Int || allowed_float);
         gl21::GetIntegerv(pname, params);
+        if pname == gl21::MAX_CLIP_PLANES {
+            // Only CLIP_PLANE0 through CLIP_PLANE5 are exposed by this GLES
+            // adapter. Desktop drivers may advertise more (e.g. Mesa's eight).
+            *params = (*params).min(6);
+        }
     }
     unsafe fn GetTexEnviv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
         let (type_, _count) = TEX_ENV_PARAMS.get_type_info(pname);
         assert!(type_ == ParamType::Int);
         assert_eq!(target, gl21::TEXTURE_ENV);
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_get_tex_env_iv(target: GLenum, pname: GLenum, params: *mut GLint);
+            }
+            touchhle_web_get_tex_env_iv(target, pname, params);
+        }
+        #[cfg(not(target_os = "emscripten"))]
         gl21::GetTexEnviv(target, pname, params);
     }
     unsafe fn GetTexEnvfv(&mut self, target: GLenum, pname: GLenum, params: *mut GLfloat) {
         let (type_, _count) = TEX_ENV_PARAMS.get_type_info(pname);
         assert!(type_ == ParamType::Float);
         assert_eq!(target, gl21::TEXTURE_ENV);
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_get_tex_env_fv(target: GLenum, pname: GLenum, params: *mut GLfloat);
+            }
+            touchhle_web_get_tex_env_fv(target, pname, params);
+        }
+        #[cfg(not(target_os = "emscripten"))]
         gl21::GetTexEnvfv(target, pname, params);
     }
     unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
@@ -971,10 +1063,18 @@ impl GLES for GLES1OnGL2<'_> {
         gl21::FrontFace(mode);
     }
     unsafe fn DepthRangef(&mut self, near: GLclampf, far: GLclampf) {
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn glDepthRangef(near: f32, far: f32);
+            }
+            glDepthRangef(near, far);
+        }
+        #[cfg(not(target_os = "emscripten"))]
         gl21::DepthRange(near.into(), far.into())
     }
     unsafe fn DepthRangex(&mut self, near: GLclampx, far: GLclampx) {
-        gl21::DepthRange(fixed_to_float(near).into(), fixed_to_float(far).into())
+        self.DepthRangef(fixed_to_float(near), fixed_to_float(far))
     }
     unsafe fn PolygonOffset(&mut self, factor: GLfloat, units: GLfloat) {
         gl21::PolygonOffset(factor, units)
@@ -1060,28 +1160,52 @@ impl GLES for GLES1OnGL2<'_> {
 
     // Points
     unsafe fn PointSize(&mut self, size: GLfloat) {
-        gl21::PointSize(size)
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_point_size(size: GLfloat);
+            }
+            touchhle_web_point_size(size);
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        gl21::PointSize(size);
     }
     unsafe fn PointSizex(&mut self, size: GLfixed) {
-        gl21::PointSize(fixed_to_float(size))
+        self.PointSize(fixed_to_float(size))
     }
     unsafe fn PointParameterf(&mut self, pname: GLenum, param: GLfloat) {
-        gl21::PointParameterf(pname, param)
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_point_parameter_f(pname: GLenum, param: GLfloat);
+            }
+            touchhle_web_point_parameter_f(pname, param);
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        gl21::PointParameterf(pname, param);
     }
     unsafe fn PointParameterx(&mut self, pname: GLenum, param: GLfixed) {
         POINT_PARAMS.setx(
-            |param| gl21::PointParameterf(pname, param),
+            |param| self.PointParameterf(pname, param),
             |_| unreachable!(), // no integer parameters exist
             pname,
             param,
         );
     }
     unsafe fn PointParameterfv(&mut self, pname: GLenum, params: *const GLfloat) {
-        gl21::PointParameterfv(pname, params)
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_point_parameter_fv(pname: GLenum, params: *const GLfloat);
+            }
+            touchhle_web_point_parameter_fv(pname, params);
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        gl21::PointParameterfv(pname, params);
     }
     unsafe fn PointParameterxv(&mut self, pname: GLenum, params: *const GLfixed) {
         POINT_PARAMS.setxv(
-            |params| gl21::PointParameterfv(pname, params),
+            |params| self.PointParameterfv(pname, params),
             |_| unreachable!(), // no integer parameters exist
             pname,
             params,
@@ -1091,35 +1215,35 @@ impl GLES for GLES1OnGL2<'_> {
     // Lighting and materials
     unsafe fn Fogf(&mut self, pname: GLenum, param: GLfloat) {
         FOG_PARAMS.assert_component_count(pname, 1);
-        gl21::Fogf(pname, param);
+        fog_f(pname, param);
     }
     unsafe fn Fogx(&mut self, pname: GLenum, param: GLfixed) {
         FOG_PARAMS.setx(
-            |param| gl21::Fogf(pname, param),
-            |param| gl21::Fogi(pname, param),
+            |param| fog_f(pname, param),
+            |param| fog_i(pname, param),
             pname,
             param,
         )
     }
     unsafe fn Fogfv(&mut self, pname: GLenum, params: *const GLfloat) {
         FOG_PARAMS.assert_known_param(pname);
-        gl21::Fogfv(pname, params);
+        fog_fv(pname, params);
     }
     unsafe fn Fogxv(&mut self, pname: GLenum, params: *const GLfixed) {
         FOG_PARAMS.setxv(
-            |params| gl21::Fogfv(pname, params),
-            |params| gl21::Fogiv(pname, params),
+            |params| fog_fv(pname, params),
+            |params| fog_iv(pname, params),
             pname,
             params,
         )
     }
     unsafe fn Lightf(&mut self, light: GLenum, pname: GLenum, param: GLfloat) {
         LIGHT_PARAMS.assert_component_count(pname, 1);
-        gl21::Lightf(light, pname, param);
+        light_f(light, pname, param);
     }
     unsafe fn Lightx(&mut self, light: GLenum, pname: GLenum, param: GLfixed) {
         LIGHT_PARAMS.setx(
-            |param| gl21::Lightf(light, pname, param),
+            |param| light_f(light, pname, param),
             |param| gl21::Lighti(light, pname, param),
             pname,
             param,
@@ -1127,11 +1251,11 @@ impl GLES for GLES1OnGL2<'_> {
     }
     unsafe fn Lightfv(&mut self, light: GLenum, pname: GLenum, params: *const GLfloat) {
         LIGHT_PARAMS.assert_known_param(pname);
-        gl21::Lightfv(light, pname, params);
+        light_fv(light, pname, params);
     }
     unsafe fn Lightxv(&mut self, light: GLenum, pname: GLenum, params: *const GLfixed) {
         LIGHT_PARAMS.setxv(
-            |params| gl21::Lightfv(light, pname, params),
+            |params| light_fv(light, pname, params),
             |params| gl21::Lightiv(light, pname, params),
             pname,
             params,
@@ -1164,12 +1288,15 @@ impl GLES for GLES1OnGL2<'_> {
     unsafe fn Materialf(&mut self, face: GLenum, pname: GLenum, param: GLfloat) {
         assert!(face == gl21::FRONT_AND_BACK);
         MATERIAL_PARAMS.assert_component_count(pname, 1);
+        #[cfg(target_os = "emscripten")]
+        gl21::Materialfv(face, pname, &param);
+        #[cfg(not(target_os = "emscripten"))]
         gl21::Materialf(face, pname, param);
     }
     unsafe fn Materialx(&mut self, face: GLenum, pname: GLenum, param: GLfixed) {
         assert!(face == gl21::FRONT_AND_BACK);
         MATERIAL_PARAMS.setx(
-            |param| gl21::Materialf(face, pname, param),
+            |param| self.Materialf(face, pname, param),
             |_| unreachable!(), // no integer parameters exist
             pname,
             param,
@@ -1391,7 +1518,7 @@ impl GLES for GLES1OnGL2<'_> {
                 &mut index_buffer_binding,
             );
             let indices = if index_buffer_binding != 0 {
-                let mapped_buffer = gl21::MapBuffer(gl21::ELEMENT_ARRAY_BUFFER, gl21::READ_ONLY);
+                let mapped_buffer = map_buffer(gl21::ELEMENT_ARRAY_BUFFER, gl21::READ_ONLY);
                 assert!(!mapped_buffer.is_null());
                 // in this case the indices is actually an offest!
                 mapped_buffer.add(indices as usize)
@@ -1433,7 +1560,7 @@ impl GLES for GLES1OnGL2<'_> {
             };
 
             if index_buffer_binding != 0 {
-                gl21::UnmapBuffer(gl21::ELEMENT_ARRAY_BUFFER);
+                unmap_buffer(gl21::ELEMENT_ARRAY_BUFFER);
             }
 
             Some(self.translate_fixed_point_arrays(first, count))
@@ -1480,6 +1607,16 @@ impl GLES for GLES1OnGL2<'_> {
         )
     }
     unsafe fn ClearDepthf(&mut self, depth: GLclampf) {
+        #[cfg(target_os = "emscripten")]
+        {
+            // Emscripten exposes the GLES float ABI, not desktop GL's double
+            // entry point. Casting the proc pointer traps on WebAssembly.
+            extern "C" {
+                fn glClearDepthf(depth: f32);
+            }
+            glClearDepthf(depth);
+        }
+        #[cfg(not(target_os = "emscripten"))]
         gl21::ClearDepth(depth.into())
     }
     unsafe fn ClearDepthx(&mut self, depth: GLclampx) {
@@ -1792,15 +1929,15 @@ impl GLES for GLES1OnGL2<'_> {
         match target {
             gl21::TEXTURE_ENV => {
                 TEX_ENV_PARAMS.assert_component_count(pname, 1);
-                gl21::TexEnvf(target, pname, param)
+                tex_env_f(target, pname, param)
             }
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
-                gl21::TexEnvf(target, pname, param)
+                tex_env_f(target, pname, param)
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
-                gl21::TexEnvf(target, pname, param)
+                tex_env_f(target, pname, param)
             }
             gl21::TEXTURE_2D => {
                 // This is not a valid TexEnvf target, but we're tolerating it
@@ -1810,7 +1947,7 @@ impl GLES for GLES1OnGL2<'_> {
                     "Tolerating glTexEnvf(GL_TEXTURE_2D, TEXTURE_ENV_MODE, {})",
                     param
                 );
-                gl21::TexEnvf(target, pname, param)
+                tex_env_f(target, pname, param)
             }
             _ => unimplemented!("TexEnvf target {}", target.to_string()),
         }
@@ -1818,18 +1955,18 @@ impl GLES for GLES1OnGL2<'_> {
     unsafe fn TexEnvx(&mut self, target: GLenum, pname: GLenum, param: GLfixed) {
         match target {
             gl21::TEXTURE_ENV => TEX_ENV_PARAMS.setx(
-                |param| gl21::TexEnvf(target, pname, param),
-                |param| gl21::TexEnvi(target, pname, param),
+                |param| tex_env_f(target, pname, param),
+                |param| tex_env_i(target, pname, param),
                 pname,
                 param,
             ),
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
-                gl21::TexEnvf(target, pname, fixed_to_float(param))
+                tex_env_f(target, pname, fixed_to_float(param))
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
-                gl21::TexEnvf(target, pname, fixed_to_float(param))
+                tex_env_f(target, pname, fixed_to_float(param))
             }
             _ => unimplemented!(),
         }
@@ -1838,15 +1975,15 @@ impl GLES for GLES1OnGL2<'_> {
         match target {
             gl21::TEXTURE_ENV => {
                 TEX_ENV_PARAMS.assert_component_count(pname, 1);
-                gl21::TexEnvi(target, pname, param)
+                tex_env_i(target, pname, param)
             }
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
-                gl21::TexEnvi(target, pname, param)
+                tex_env_i(target, pname, param)
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
-                gl21::TexEnvi(target, pname, param)
+                tex_env_i(target, pname, param)
             }
             gl21::TEXTURE_2D => {
                 // This is not a valid TexEnvi target, but we're tolerating it
@@ -1856,7 +1993,7 @@ impl GLES for GLES1OnGL2<'_> {
                     "Tolerating glTexEnvi(GL_TEXTURE_2D, TEXTURE_ENV_MODE, {})",
                     param
                 );
-                gl21::TexEnvi(target, pname, param)
+                tex_env_i(target, pname, param)
             }
             _ => unimplemented!("target 0x{:X}, pname 0x{:X}", target, pname),
         }
@@ -1878,15 +2015,15 @@ impl GLES for GLES1OnGL2<'_> {
         match target {
             gl21::TEXTURE_ENV => {
                 TEX_ENV_PARAMS.assert_known_param(pname);
-                gl21::TexEnvfv(target, pname, params)
+                tex_env_fv(target, pname, params)
             }
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
-                gl21::TexEnvfv(target, pname, params)
+                tex_env_fv(target, pname, params)
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
-                gl21::TexEnvfv(target, pname, params)
+                tex_env_fv(target, pname, params)
             }
             _ => unimplemented!(),
         }
@@ -1894,20 +2031,20 @@ impl GLES for GLES1OnGL2<'_> {
     unsafe fn TexEnvxv(&mut self, target: GLenum, pname: GLenum, params: *const GLfixed) {
         match target {
             gl21::TEXTURE_ENV => TEX_ENV_PARAMS.setxv(
-                |params| gl21::TexEnvfv(target, pname, params),
-                |params| gl21::TexEnviv(target, pname, params),
+                |params| tex_env_fv(target, pname, params),
+                |params| tex_env_iv(target, pname, params),
                 pname,
                 params,
             ),
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
                 let param = fixed_to_float(params.read());
-                gl21::TexEnvfv(target, pname, &param)
+                tex_env_fv(target, pname, &param)
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
                 let param = fixed_to_float(params.read());
-                gl21::TexEnvfv(target, pname, &param)
+                tex_env_fv(target, pname, &param)
             }
             _ => unimplemented!(),
         }
@@ -1916,15 +2053,15 @@ impl GLES for GLES1OnGL2<'_> {
         match target {
             gl21::TEXTURE_ENV => {
                 TEX_ENV_PARAMS.assert_known_param(pname);
-                gl21::TexEnviv(target, pname, params)
+                tex_env_iv(target, pname, params)
             }
             gl21::TEXTURE_FILTER_CONTROL_EXT => {
                 assert!(pname == gl21::TEXTURE_LOD_BIAS_EXT);
-                gl21::TexEnviv(target, pname, params)
+                tex_env_iv(target, pname, params)
             }
             gl21::POINT_SPRITE => {
                 assert!(pname == gl21::COORD_REPLACE);
-                gl21::TexEnviv(target, pname, params)
+                tex_env_iv(target, pname, params)
             }
             _ => unimplemented!(),
         }
@@ -2111,7 +2248,9 @@ impl GLES for GLES1OnGL2<'_> {
         width: GLsizei,
         height: GLsizei,
     ) {
-        gl21::RenderbufferStorageEXT(target, internalformat, width, height)
+        gl21::RenderbufferStorageEXT(target, internalformat, width, height);
+        #[cfg(target_os = "emscripten")]
+        log!("Browser renderbuffer: format={internalformat:#x}, {width}x{height}");
     }
     unsafe fn FramebufferRenderbufferOES(
         &mut self,
@@ -2150,7 +2289,10 @@ impl GLES for GLES1OnGL2<'_> {
         gl21::GetRenderbufferParameterivEXT(target, pname, params)
     }
     unsafe fn CheckFramebufferStatusOES(&mut self, target: GLenum) -> GLenum {
-        gl21::CheckFramebufferStatusEXT(target)
+        let status = gl21::CheckFramebufferStatusEXT(target);
+        #[cfg(target_os = "emscripten")]
+        log!("Browser framebuffer status: {status:#x}");
+        status
     }
     unsafe fn DeleteFramebuffersOES(&mut self, n: GLsizei, framebuffers: *const GLuint) {
         gl21::DeleteFramebuffersEXT(n, framebuffers)
@@ -2165,9 +2307,9 @@ impl GLES for GLES1OnGL2<'_> {
         gl21::GetBufferParameteriv(target, pname, params)
     }
     unsafe fn MapBufferOES(&mut self, target: GLenum, access: GLenum) -> *mut GLvoid {
-        gl21::MapBuffer(target, access)
+        map_buffer(target, access)
     }
     unsafe fn UnmapBufferOES(&mut self, target: GLenum) -> GLboolean {
-        gl21::UnmapBuffer(target)
+        unmap_buffer(target)
     }
 }

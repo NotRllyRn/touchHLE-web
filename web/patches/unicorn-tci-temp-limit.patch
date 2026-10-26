@@ -1,0 +1,46 @@
+--- a/qemu/tcg/tcg.c
++++ b/qemu/tcg/tcg.c
+@@ -899,7 +899,11 @@
+ static inline TCGTemp *tcg_temp_alloc(TCGContext *s)
+ {
+     int n = s->nb_temps++;
+-    tcg_debug_assert(n < TCG_MAX_TEMPS);
++    /* Keep this check in release builds: writing past temps[] corrupts
++     * the translator, not guest memory. */
++    if (n >= TCG_MAX_TEMPS) {
++        tcg_abort();
++    }
+     return memset(&s->temps[n], 0, sizeof(TCGTemp));
+ }
+ 
+@@ -1612,6 +1616,15 @@
+         }
+     }
+ #endif /* TCG_TARGET_EXTEND_ARGS */
++
++    /* The WASM helper adapter above allocated a zero-extension temporary
++     * for each narrow argument. The emitted call now owns the use, so make
++     * these available to subsequent instructions in the same block. */
++    for (i = 0; i < nargs; ++i) {
++        if (!(sizemask & (1 << (i + 1) * 2))) {
++            tcg_temp_free_internal(tcg_ctx, args[i]);
++        }
++    }
+ }
+ 
+ static void tcg_reg_alloc_start(TCGContext *s)
+--- a/qemu/include/tcg/tcg.h
++++ b/qemu/include/tcg/tcg.h
+@@ -947,7 +947,11 @@
+      * 16-bit unsigned offsets, TranslationBlock.jmp_reset_offset[]
+      * and TCGContext.gen_insn_end_off[].
+      */
+-    return tcg_ctx->nb_ops >= 4000;
++    /* Instruction-count instrumentation consumes temporaries, especially
++     * on 32-bit TCI hosts. Leave space for the next instruction and TB exit
++     * instead of overflowing temps[] before the operation limit is reached. */
++    return tcg_ctx->nb_ops >= 4000 ||
++           tcg_ctx->nb_temps >= TCG_MAX_TEMPS - 128;
+ }
+ 
+ /* pool based memory allocation */

@@ -5,6 +5,8 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
+pub mod memory;
+
 pub const MAX_IPA_BYTES: usize = 256 * 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;

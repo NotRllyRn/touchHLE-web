@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: MPL-2.0
+importScripts('./touchhle-runtime.js', './audio-proxy.js');
+self.onmessage = async ({ data }) => {
+  if (data.type !== 'start') return;
+  self.onmessage = null; // One guest per worker; Stop destroys the instance.
+  try {
+    if (!(data.file instanceof Blob) || data.file.size > 256 * 1024 * 1024) throw new Error('Invalid or oversized IPA');
+    const canvas = data.canvas;
+    if (canvas) {
+      // SDL's worker video backend needs browser display metadata and a canvas
+      // lookup; input is forwarded separately, not dispatched by this facade.
+      self.screen = { width: canvas.width, height: canvas.height };
+      canvas.style = {};
+      canvas.addEventListener = () => {};
+      canvas.removeEventListener = () => {};
+      canvas.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: canvas.width, height: canvas.height });
+      self.document = {
+        querySelector: selector => selector === '#canvas' ? canvas : null,
+        getElementById: id => id === 'canvas' ? canvas : null,
+        addEventListener() {}, removeEventListener() {},
+        createElement: tag => { if (tag === 'canvas') return new OffscreenCanvas(1, 1); throw new Error(`Unsupported DOM element: ${tag}`); },
+        documentElement: { style: {} },
+      };
+    }
+    const runtime = await createTouchHLE({
+      canvas,
+      noInitialRun: true,
+      print: message => self.postMessage({ type: 'log', message }),
+      printErr: message => self.postMessage({ type: 'log', message }),
+      onAbort: message => self.postMessage({ type: 'error', message: `${message}\n${new Error().stack}` }),
+      onExit: code => self.postMessage({ type: 'exit', code }),
+    });
+    if (runtime.debugSnapshot) self.__touchhleRuntime = runtime;
+    if (data.audioClock) {
+      self.AudioContext = self.installTouchHLEAudio(data.audioClock, message => self.postMessage(message));
+      self.window = { AudioContext: self.AudioContext };
+    }
+    self.onmessage = ({ data: input }) => {
+      if (input.type === 'touches') for (const point of input.points) {
+        runtime.ccall('touchhle_web_touch', null,
+          ['number', 'number', 'number', 'number', 'number'],
+          [input.kind, point.id, point.x, point.y, input.timestamp]);
+      }
+      if (input.type === 'pointer') runtime.ccall('touchhle_web_pointer', null,
+        ['number', 'number', 'number'], [input.kind, input.x, input.y]);
+    };
+    runtime.FS.writeFile('/app.ipa', new Uint8Array(await data.file.arrayBuffer()));
+    self.postMessage({ type: 'log', message: 'Starting the touchHLE loader…' });
+    await runtime.ccall('touchhle_web_start', null, ['number'], [data.headless ? 1 : 0], { async: true });
+  } catch (error) {
+    if (error.name === 'ExitStatus') self.postMessage({ type: 'exit', code: error.status });
+    else self.postMessage({ type: 'error', message: String(error.stack ?? error.message ?? error) });
+  }
+};

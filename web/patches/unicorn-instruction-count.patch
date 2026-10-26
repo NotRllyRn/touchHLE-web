@@ -1,0 +1,18 @@
+diff --git a/uc.c b/uc.c
+index 75b89a0..842e40c 100644
+--- a/uc.c
++++ b/uc.c
+@@ -1053,6 +1053,13 @@ static void hook_count_cb(struct uc_struct *uc, uint64_t address, uint32_t size,
+     }
+ }
+ 
++// touchHLE: reuse the budget hook instead of a second per-instruction hook.
++// The stopping hook counts one instruction past the budget, before execution.
++UNICORN_EXPORT size_t touchHLE_uc_executed(uc_engine *uc)
++{
++    return uc->emu_counter > uc->emu_count ? uc->emu_count : uc->emu_counter;
++}
++
+ static void clear_deleted_hooks(uc_engine *uc)
+ {
+     struct list_item *cur;

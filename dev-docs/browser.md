@@ -1,5 +1,16 @@
 # Browser implementation plan
 
+Current status: touchHLE loads and runs the local TinkerBox HD 1.4.1 IPA in
+Chromium. A clean build renders textured Training 01, accepts Play, simulates
+the ball down the ramps, and advances to Lesson 2. Mouse-wheel pinch zoom and
+browser touch drag from the element tray work there; placing the ball and
+pressing Play reaches SUCCESS in Lesson 2. These results use the
+actual Rust HLE/ARM runtime, without injected rendering repairs or remote
+execution. Startup and level loading remain very slow (about 56 minutes to the
+first lesson in the latest headless run); rendering is not real-time. Full-game
+compatibility, save persistence, and audiovisual synchronization remain unverified.
+See the chronological validation notes below for tests and remaining limits.
+
 ## Contract
 
 Static hosting only. IPA bytes never leave the user's device. Supported,
@@ -85,10 +96,9 @@ control flow, GLES1 completeness, browser memory pressure, dependency licenses.
 
 ## Execution policy
 
-Development is paused at the owner's request. Publish existing work and this
-plan; do not implement further milestones until development is resumed.
-The existing CPU and parser experiments are retained, not presented as a
-completed browser emulator. See [machine setup](browser-setup.md).
+Development resumed at the owner's request on 2026-10-20, targeting the supplied
+TinkerBox HD 1.4.1 IPA. The experiments are not a completed browser emulator.
+See [machine setup](browser-setup.md).
 
 ## Requirements and boundaries
 
@@ -245,3 +255,851 @@ decision rationale, commands, observed results and remaining limitations here.
 Keep native backend as rollback/reference; enable incomplete web paths explicitly.
 No upstream PR is implied. No delivery date is committed before M1 establishes
 integration feasibility and M4 measures real game performance.
+
+## 2026-10-20 — resumed browser integration and runtime experiments
+
+The supplied download is stored outside the checkout at
+`/root/local-ipas/TinkerBox HD 1.4.1.ipa`; no IPA or extracted assets were added.
+SHA-256: `d1a915ac97ccd48ffbd69946532b8653b4a79b42c9889b00a97327fb2c1dbb15`.
+Actual WASM preflight reports `com.autodesk.tinkerbox`, ARM32, unencrypted,
+850 ZIP entries and 98,082,466 declared expanded bytes. This is eligibility,
+not execution or a compatibility result.
+
+Implemented a local file picker and disposable module worker for the existing
+Rust parser. Build now compiles/copies its WASM. The input remains a local File;
+Stop terminates the worker and a new import gets a fresh instance. Fixed a real
+ABI allocation bug: `vec![0; len]` inferred i32, but inspect reconstructed a u8
+allocation. Explicit `0u8` fixes the allocator-layout mismatch. Real WASM tests
+failed with an allocator trap before the fix and pass afterwards.
+
+M1 experiments now include stable, aligned sparse guest mappings and an
+Emscripten Rust/C fiber fixture. The memory prototype checks high addresses,
+null-page guards, overlap, budgets, overflow, stable pointers and cross-page
+slices inside one mapping. It explicitly rejects slices across distinct host
+allocations. The fiber fixture preserves Rust heap state through C callbacks,
+nested Rust reentry and two yields, with destructor checks over 100 restarts.
+It uses panic=abort; it does not support unwinding across fibers or FFI.
+
+The pinned Unicorn.js source was built locally (wrapper
+`fdfcc4fd5e7d4ceeebe6b4d65b19eea4aa655e5d`, Unicorn
+`8028ec436f2d9376525352dd38ed9ed6b9f6be10`, upstream TCI/helper patches).
+The shared CPU fixture links Rust-owned sparse mappings and the C interpreter
+in one WASM instance. It tests ARM, Thumb, VFP, FPSCR contexts, a Rust memory
+callback, SVC stop/resume, explicit code-cache invalidation, unmapped faults and
+bounded execution. An initial fixture failure exposed the need to pass actual
+64-bit arguments through Unicorn's variadic cache-control API; fixed in the
+fixture. Emscripten warns that madvise/mprotect are unsupported; no host memory
+protection guarantee is inferred from these tests.
+
+Environment: Linux x86_64, Rust 1.99.1, Node 22.22.3, Emscripten 4.0.23,
+Playwright 1.56.1, headless Chromium 141.0.7390.37. T3 preview failed with:
+`This host blocks the sandbox T3's browser runs in (AppArmor on Ubuntu 23.10+).`
+Used the documented optional Playwright harness and local headless Chromium
+fallback; no Firefox/Safari/mobile results are claimed.
+
+Validation commands and results:
+
+- `cargo test --locked -p touchhle-browser`: 9 passed (7 parser, 2 memory).
+- `cd web && npm run build && npm test`: build passed; 4 Node test groups passed,
+  including all 9 original CPU fixtures and real WASM ABI/memory checks.
+- `node web/build-fibers.mjs` (activated SDK); Node execution of generated module:
+  passed Rust/C reentry, two yields, RAII and 100 restarts.
+- `(cd target/unicorn.js && python3 build.py arm)` and
+  `node web/build-shared-cpu.mjs`: passed source build; Node shared CPU checks
+  passed, with the unsupported-syscall warnings described above.
+- `TEST_SHARED_CPU=1 TEST_FIBERS=1
+  PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+  TEST_IPA='/root/local-ipas/TinkerBox HD 1.4.1.ipa' node web/test-browser.mjs`
+  against `python3 -m http.server 8765 --bind 0.0.0.0 --directory web/dist`:
+  passed CPU/fibers/sparse memory, real IPA import, malformed IPA, stop/reimport
+  and same-origin GET-only requests; no page errors. Local result log: `target/browser-integration.log`.
+- `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --locked --lib -- --skip test_app`:
+  30 passed. Initial attempts failed for missing Boost/Xext headers, then missing
+  sndio linker library. Installed the missing development packages and reran;
+  no native source compatibility changes were needed. Log: `target/native-tests.log`.
+- `cargo fmt --all --check`, standalone fixture `rustfmt --check`, and
+  `git diff --check`: passed.
+- Dependency fetch initially failed because this host globally rewrites GitHub
+  HTTPS to SSH. Used `GIT_CONFIG_GLOBAL=/dev/null CARGO_NET_GIT_FETCH_WITH_CLI=true`
+  for the fetch/build, without changing global Git configuration.
+
+Remaining work: **TinkerBox does not run in the browser yet.** None of these
+experiments boots the actual HLE. Native `Mem` still assumes a contiguous 4 GiB
+reservation, `Cpu` still uses Dynarmic, and `Environment` still uses corosensei.
+The sparse-memory experiment needs allocator/loader integration, unmapping,
+permissions and a full audit of retained pointers and cross-region accesses.
+The shared CPU fixture now also stops at SVC, enters a Rust host callback,
+yields twice, executes nested ARM, restores the caller context and resumes it
+over ten fresh interpreter instances. This passes in Node and Chromium. These
+are fixture callbacks, not actual HLE framework calls: real scheduler
+cancellation/error cleanup, thread switching and framework reentry remain
+unproven.
+Next integrate these boundaries behind target-specific adapters, boot an owned
+HLE guest fixture, then implement GLES/WebGL, input/audio and local persistence
+before attempting TinkerBox's first interactive level and the 35-level sweep.
+No game rendering, physics, sound, saves, FPS or browser gameplay is claimed.
+
+## Actual HLE browser integration (2026-10-20)
+
+This supersedes the earlier feasibility-only status above. The actual Rust
+loader, dyld, Objective-C/framework implementations and scheduler now link into
+one Emscripten module with source-built Unicorn. Native builds retain Dynarmic
+and corosensei. The page's Run IPA creates a disposable worker, writes the local
+File into MEMFS, and invokes the actual HLE. The static server only serves GETs.
+
+Implementation boundaries:
+
+- Unicorn implements the existing CPU adapter ABI, including ARM/Thumb, VFP
+  registers/FPSCR, SVC stops, contexts, code invalidation and instruction budgets.
+- Rust memory uses a stable 256 MiB low arena and separately mapped high dylib
+  and stack segments, with a 384 MiB mapping budget. This is bounded storage,
+  not full sparse virtual-memory/permission parity. Native 4 GiB reservation
+  remains unchanged. Stack-top arithmetic uses u64 on the 32-bit WASM host.
+- Emscripten fibers preserve guest/host/nested-guest continuations. Panics abort;
+  suspended stacks do not unwind. Stop terminates the entire worker.
+- OffscreenCanvas/SDL creates WebGL1 through the existing GLES1-on-GL2 backend
+  and Emscripten legacy GL emulation. Optional controller/sensor subsystems are
+  skipped on web. Pointer events are forwarded to SDL; game interaction is
+  not yet validated. Worker audio and persistent saves remain unresolved.
+- The Unicorn.js helper adapter leaked translation temporaries, corrupting the
+  translator on long ARM blocks. `web/patches/unicorn-tci-temp-limit.patch` frees
+  these temporaries, limits blocks and checks bounds in release builds.
+  `web/patch-unicorn.mjs` verifies pinned revisions and applies it idempotently
+  after upstream's build patches. The 512-instruction regression failed before
+  the fix with heap corruption and passes after it.
+- Empty memmove/memcpy returns without translating pointers, preserving native
+  behavior for the zero-byte/null copy used by TinkerBox during startup.
+
+Tests run in this environment (Chromium 141.0.7390.37, Emscripten 4.0.23):
+
+```sh
+cargo fmt --all --check
+cargo test --lib                         # 30 passed
+cargo test --manifest-path src/browser/Cargo.toml # 9 passed
+python3 web/fixtures/make-hle-ipa.py
+cargo run -- target/browser-hle-test.ipa --headless # exit 0
+npm --prefix web test
+PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs node web/test-runtime.mjs
+TEST_SHARED_CPU=1 TEST_FIBERS=1 PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs TEST_IPA='/root/local-ipas/TinkerBox HD 1.4.1.ipa' node web/test-browser.mjs
+```
+
+The original tiny IPA uses real Mach-O imports and ARM instructions to call
+memcpy(NULL,NULL,0), puts and exit. It passes native and two successive browser
+runs, with no page errors and same-origin GET-only traffic. This proves real
+IPA execution through the HLE, not game compatibility. CPU/fiber/parser/browser
+integration tests also pass. T3 preview was explicitly unavailable under the
+host AppArmor sandbox; these checks use the documented standalone Playwright
+workflow. Emscripten still warns about unsupported madvise/mprotect; host page
+protection must not be assumed.
+
+The proprietary IPA remains outside the repository at
+`/root/local-ipas/TinkerBox HD 1.4.1.ipa`; SHA256:
+`d1a915ac97ccd48ffbd69946532b8653b4a79b42c9889b00a97327fb2c1dbb15`.
+No IPA or extracted assets belong in commits. Current startup investigation
+and remaining acceptance results are recorded below.
+
+Startup comparison: native `--headless` stops when UIKit requests a window, as
+expected. `timeout 120 xvfb-run -a target/debug/touchHLE '/root/local-ipas/TinkerBox HD 1.4.1.ipa' --gles1=gles1_on_gl2`
+passes the initial graphics path, then aborts opening the host audio device
+(no ALSA device in this container). Browser WebGL1 instead faults in the
+orientation callback at guest PC 0xd53134, writing address 0x5c. A focused
+Chromium check confirms RGBA8 renderbuffer allocation returns INVALID_ENUM
+(1280) in WebGL1 and NO_ERROR in WebGL2. The browser context is being moved to
+WebGL2 to support the renderbuffer format required by the existing renderer.
+These failed startup checks are not gameplay passes.
+
+WebGL2 resolved the incomplete framebuffer: the original RGBA8 request was
+768x1024 but WebGL1 returned zero dimensions and FRAMEBUFFER_INCOMPLETE_ATTACHMENT
+(0x8cd6). The WebGL2 run reports FRAMEBUFFER_COMPLETE (0x8cd5) and progresses to
+thread creation. Some depth/stencil combinations are unsupported (0x8cdd);
+TinkerBox probes these and selects supported formats.
+
+Thread creation exposed a fiber adapter bug: initializing the caller fiber at
+creation captured a guest stack, but the scheduler later resumed it from the
+main stack. Reinitialize caller context on every resume. The original adapter
+fails the new `web/fixtures/fibers/adapter.c` regression with a stack-limit error;
+the fixed adapter passes 10 nested-creation/scheduler-resume/async-sleep cycles
+in Node and Chromium. `node web/build-fibers.mjs` builds the actual adapter test,
+and `TEST_FIBERS=1 ... node web/test-browser.mjs` runs both fiber suites.
+
+The game renders its real Autodesk splash screen in Chromium after the fiber
+caller-context fix. The next SDL locale lookup exposed 8-byte-aligned C stacks;
+Emscripten's EM_ASM varargs require 16-byte alignment. C fiber stacks now use
+`aligned_alloc(16, size)`. The regression checks stack-base alignment and an
+EM_ASM argument; replacing it with the previous malloc reproduces the failure.
+SDL locale lookup then successfully reports the browser's `en` preference.
+No locale override is required. Further startup reaches accelerometer setup
+but stops at a WASM function signature/missing-function error; investigation
+continues. A splash screen alone does not establish working gameplay.
+
+A native graphical comparison with `ALSOFT_DRIVERS=null` bypasses the absent
+host audio device, but later stops at `Unexpected glDisable(0x3006)` in the
+existing renderer. Native unit tests still pass; this Linux graphical run is
+not a native gameplay pass.
+
+Reproduce a graphical browser investigation without committing assets:
+
+```sh
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs RUN_SECONDS=180 \
+  node web/inspect-ipa.mjs '/absolute/path/to/app.ipa'
+```
+
+This diagnostic writes screenshots under ignored `target/browser-inspection`,
+prints worker logs, stops on errors, and destroys the worker at the end. Optional
+`CLICKS='[{"second":100,"x":0.5,"y":0.5}]'` sends pointer input using fractions
+of the displayed canvas. It is not automatically a gameplay acceptance test.
+
+The function mismatch was the desktop double-precision `glClearDepth` pointer;
+Emscripten exposes the GLES float ABI. The browser adapter now directly calls
+`glClearDepthf` and `glDepthRangef`; native desktop calls remain unchanged.
+Emscripten's legacy GetBooleanv also aborts on TEXTURE_2D, so browser capability
+queries use IsEnabled, which reads its emulated server state.
+
+`python3 web/fixtures/make-hle-ipa.py --graphics` builds an original ARM IPA that
+binds an Objective-C class reference, creates an EAGLContext, executes float
+depth calls, allocates an RGBA8 renderbuffer, checks its width, and checks the
+texture capability query and GL error state before printing success. It passes
+native under Xvfb and twice in Chromium:
+
+```sh
+ALSOFT_DRIVERS=null xvfb-run -a cargo run -- target/browser-graphics-test.ipa --gles1=gles1_on_gl2
+TEST_GRAPHICS=1 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-runtime.mjs
+```
+
+Both Chromium runs exit 0 with no page errors and local GET-only traffic. This
+is a real HLE/Objective-C/GLES integration regression, not a game screenshot.
+
+Audio integration: the Run gesture creates and resumes a page AudioContext.
+`web/audio-proxy.js` supplies Emscripten OpenAL's playback interface inside the
+worker, forwarding decoded PCM buffers and node/parameter/scheduling operations
+to `web/audio.mjs` on the page. No network operation is involved. Stop closes
+the context and destroys the worker; completed buffer sources are disconnected
+and removed. Capture, background-tab suspend/resume, multiple simultaneous AL
+context suspension, and long-session audio drift are not yet validated.
+
+`PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-audio.mjs`
+passes a worker-to-real-OfflineAudioContext regression: 0.5 PCM amplitude through
+0.25 gain produces 0.125, stopping at sample 240 leaves the remainder silent,
+and ended sources are removed. Build the test worker with `npm run build`.
+TinkerBox proceeds beyond the previous AudioToolbox context-creation abort and
+continues asset loading in the long browser run. Audible game output and menu
+interaction are still separate acceptance checks.
+
+The texture-environment setter probe initially failed because Emscripten's
+getProcAddress table omits those setters. Browser calls now use explicit JS
+imports for the implemented scalar/float-vector setters; integer vectors retain
+scalar enum values or normalized color components. The getter shim routes to
+the initialized legacy state implementation. The expanded graphics IPA passes
+again in two Chromium runs.
+
+The graphics fixture now also creates a framebuffer, draws a red triangle
+through GLES vertex arrays, and reads back a pixel to check red/green channels
+and the GL error state. This passes natively with Mesa/Xvfb and twice in Chromium
+141.0.7390.37, with local GET-only traffic and no page errors. The adapter clamps
+MAX_CLIP_PLANES to its six exposed capabilities; Mesa previously advertised eight
+and TinkerBox tried to disable the unsupported seventh plane. The fixture checks
+the reported limit. Native unit tests (30), JavaScript tests, formatting, and
+`git diff --check` pass after this change.
+
+Native comparison after the clipping-plane fix: the optimized Linux build with
+`ALSOFT_DRIVERS=null` and Xvfb renders TinkerBox's initial terms screen. No terms
+were accepted and this is not a native level-play test. The browser investigation
+still ended on black after 351 ferror log entries; no browser menu is verified.
+
+Performance investigation: CPU profiling showed substantial time in JavaScript
+`__emscripten_throw_longjmp`. An attempted combination of ASSERTIONS=1 and
+EXCEPTION_STACK_TRACES=0 was rejected by Emscripten; that flag was removed, and
+assertions remain enabled. A source-built Unicorn variant using
+`-sSUPPORT_LONGJMP=wasm` passed the shared Rust/ARM/fiber checks in Node. A focused
+50,000-SVC-exit benchmark measured 739.2 ms with JavaScript longjmp and 225.6 ms
+with WASM-native longjmp. This is a CPU-transition benchmark, not game FPS.
+The patched archive now builds in `unicorn/build-wasm-eh`, and both consumers
+link with the matching setting. Full-runtime verification is in progress.
+
+`TOUCHHLE_WEB_DEBUG=1 node web/build-runtime.mjs` additionally exposes
+`self.__touchhleRuntime.debugSnapshot()` in the emulation worker for local heap
+and GL inspection. Normal builds omit this interface. This avoids enabling the
+worker debugger, which can deoptimize WASM. `inspect-ipa.mjs` now timestamps logs
+and uses wall-clock seconds for its duration, screenshots, and scheduled input;
+previous loop counters could understate elapsed time during slow execution.
+
+Full WASM-native-longjmp runtime verification: original headless and graphics
+IPAs each pass twice in Chromium 141, with no page errors and GET-only traffic.
+The updated shared-CPU regression repeats 1,000 SVC exits before nested
+Rust/guest/fiber reentry, over ten interpreter instances, and passes in Chromium.
+Native unit tests remain 30/30 passing. The separate graphics buffer fixture
+(`make-hle-ipa.py --buffers`, `TEST_BUFFERS=1 node web/test-runtime.mjs`) draws
+with client arrays, then overwrites the pixel using indexed vertex/index buffers;
+red/green/blue readback verifies the second draw. It passes natively and twice
+in Chromium. These are integration checks, not TinkerBox gameplay acceptance.
+
+A second measured optimization excludes only `tcg_qemu_tb_exec_arm` from
+Asyncify instrumentation. Its hooks count instructions, stop execution, report
+faults, or perform synchronous memory checks; HLE dispatch and fiber suspension
+happen after the interpreter returns. Do not add suspending callbacks inside
+this excluded function. A 5-million-instruction VFP/branch loop measured
+6152.0 ms before and 2988.9 ms after this exclusion. The repeated-SVC/shared-CPU
+and fiber regressions pass in Chromium with the exclusion. The full runtime's
+headless and indexed-buffer graphics IPAs each pass twice, with GET-only
+traffic and no page errors. This still does not establish game FPS.
+
+Follow-up alternating benchmark runs, after compilation finished, measured
+3552.0/3420.5 ms without the Asyncify exclusion and 2908.9/2836.0 ms with it
+(about 18% faster). The initial 6152.0 ms baseline was affected by concurrent
+build/test conditions; do not present that initial pair as a controlled 2x gain.
+
+Live-run diagnosis (2026-10-21): a black canvas does not yet establish a
+rendering failure. Saved main-thread registers and frame chains in the running
+WASM-native-longjmp build show synchronous FMOD Vorbis loading, then libpng/zlib
+decoding and Ogre pixel conversion/scaling. At roughly 40 minutes the stack
+includes `PopupConfirmEulaForm`, `Form::loadFromFile`, `SpriteManager::LoadSprite`,
+and `Ogre::Image::resize`. Draw counters have advanced between asset batches.
+The initial terms dialog is still being constructed; no browser menu or playable
+level is verified. This running worker predates the Asyncify exclusion. Keep
+startup latency separate from rendering correctness when reporting results.
+
+A further CPU change reuses Unicorn's existing budget counter through a small
+pinned-source accessor, removing the production adapter's duplicate instruction
+hook. The accessor clamps the stopping hook's budget+1 count to the budget.
+Production-adapter regression coverage now checks zero budget, single stepping,
+exact budget exhaustion, a 10,000-instruction slice, and early ARM/Thumb SVC
+exits. Build and runtime verification of this change are in progress.
+
+Instruction-counter validation: the shared CPU/fiber test, now linked against
+`src/web/cpu.c` and `web/fixtures/cpu/adapter.c`, passes in Node and Chromium 141
+(`TEST_SHARED_CPU=1 TEST_FIBERS=1 node web/test-browser.mjs`, log
+`target/count-browser-tests.log`). The four JavaScript tests, Rust formatting,
+JavaScript syntax checks, and `git diff --check` pass. A 5M VFP/branch benchmark
+with the duplicate hook measured 3532.9/3089.9 ms versus 2894.2/2958.5 ms with
+only the built-in hook; concurrent tests and the live game make this a noisy
+microbenchmark, not a startup-time or FPS claim. Existing Emscripten
+madvise/mprotect stub warnings remain visible in the test output.
+
+At about 44.5 minutes the live game began regular scene draws (hundreds of
+additional draw calls), but the canvas remained black. A diagnostic wrapper
+then queried uniforms using a null program and threw a JavaScript TypeError,
+terminating that run at 2730.8 seconds. This was an instrumentation failure,
+not a guest crash. Future probes must use raw WebGL queries, handle null
+programs, and contain their own errors. The first full-runtime rebuild after
+the counter change was terminated with signal 15 after Rust compilation; no
+compiler failure or OOM event was recorded. A fresh link is in progress.
+
+The original `--present` fixture creates a full-screen opaque CAEAGLLayer in a
+UIWindow, draws into its renderbuffer, presents through the actual EAGL fast
+path, and reads the default framebuffer to verify red. It passes on native
+GLES1-on-GL2. Its first draft incorrectly used objc_getClass without binding
+the classes; explicit dyld class bindings fixed that test setup failure.
+
+Presentation regressions found and fixed (2026-10-21):
+
+- The first browser `--present` run panicked restoring an unset vertex-array
+  size. Emscripten 4.0.23 initializes client descriptors as empty objects, not
+  GLES defaults. `web/emscripten-gl-init.js` initializes valid defaults.
+- The next run rendered red but reported GL_INVALID_ENUM. Tracing showed
+  missing CURRENT_COLOR, CLIENT_ACTIVE_TEXTURE, array-buffer-binding, and legacy
+  blend-factor queries. The shim supplies them from actual emulated state and
+  tracks the buffer binding at each gl*Pointer call.
+- `--present-buffers` draws with the guest VBO after presentation, then presents
+  again and checks blue. Native passed; browser pixels were blue immediately
+  after drawing but black at the later read after a scheduler yield. Setting
+  EGL's `preserveDrawingBuffer` prevents automatic browser discard at arbitrary
+  guest scheduling boundaries. The fixture then passed twice in Chromium.
+- A follow-up glGetPointerv assertion exposed Emscripten's planar-array
+  conversion replacing the application pointer with its temporary buffer.
+  Preserve declared pointers after preparation (rendering still uses the
+  generated offsets and vertexPointer). This assertion failed before the fix
+  and passes twice in Chromium afterward; native verification also runs.
+
+These fixes are browser-only, and do not establish TinkerBox gameplay. They
+were first verified by injecting the exact post-JS source into a generated
+local diagnostic build; a clean scripted rebuild is in progress. The earlier
+counter build also passes headless and indexed-buffer runtime tests twice.
+Two live TinkerBox comparisons are running: the earlier worker without retained
+drawing-buffer contents, and a new worker with preservation and query fixes.
+Both received the pointer-restoration diagnostic patch before scene rendering.
+
+Clean rebuild results: `TOUCHHLE_WEB_DEBUG=1 node web/build-runtime.mjs`
+completed successfully with the source post-JS shim. In Chromium 141, each of
+headless, indexed graphics, basic presentation, and presentation with VBO reuse
+and pointer preservation passes twice (`target/presentation-clean-*.log`).
+All runs have same-origin GET-only traffic and no page errors. The updated
+presentation/VBO/pointer fixture also passes natively. Native unit tests pass
+30/30 (`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --lib -- --skip test_app`).
+Rust formatting and `git diff --check` pass. Native code paths were unchanged
+by the browser GL shim. TinkerBox acceptance remains pending live startup.
+
+Block-budget investigation: a focused 5M-instruction ARM loop with 32-instruction
+blocks measured 1997.5/1961.2 ms with per-instruction budgeting and 332.6/347.3 ms
+with block budgeting. This is not a game FPS measurement. The production
+adapter now experimentally charges blocks using their byte length (ARM: /4;
+Thumb: /2, conservatively charging wide Thumb instructions twice). The CPU ABI
+already defines ticks as abstract; normal execution can overshoot by at most
+one translated block and remaining ticks saturate at zero. Exact instruction
+stepping remains on Unicorn's count hook. Tests cover small budgets, long-block
+infinite loops, mixed-width Thumb, SVC exits, and step/run transitions.
+
+The first adapter test hung switching from normal execution to single stepping:
+Unicorn reused a translation without its newly enabled instruction-count hook.
+Flush translated blocks when switching modes. The updated production-adapter
+and existing CPU/fiber tests pass in Node; browser and full-runtime verification
+are in progress. Live game workers still use the preceding tested adapter.
+
+Block-budget adapter tests also pass in Chromium (including fibers), log
+`target/block-adapter-browser.log`. A further presentation regression checks
+that TEXTURE_2D remains enabled after EAGL presents: Emscripten's legacy
+`glIsEnabled` does not implement this capability, so the earlier GetBooleanv
+workaround returned false. The browser adapter now queries TexEnvJIT's active
+texture-unit state directly. This test passes natively; the browser build is
+being updated before it is run. Do not treat the earlier plain-color
+presentation tests as coverage of texture-enable restoration.
+
+The texture-enable regression fails on the preceding browser build and passes
+twice after the targeted query fix. The clean block-budget/texture-state build
+also passes the VBO presentation/pointer fixture twice and the headless loader
+fixture twice, with GET-only local traffic and no page errors. Native unit tests
+remain 30/30 passing. Logs: `target/texture-state-after.log`,
+`target/block-runtime-present-buffers.log`, `target/block-runtime-headless.log`,
+and `target/texture-native-tests.log`.
+
+Both earlier comparison workers reached their configured two-hour limit and
+stopped with black final screenshots. They did not contain the texture-enable
+fix or block-budget adapter. The new complete diagnostic run uses a five-hour
+limit, its own ignored output directory, and periodic draw/register snapshots.
+It is still a diagnostic run, not a verified interactive game result.
+
+A 15-second Chrome worker CPU profile (Profiler only, no Debugger domain) of
+actual TinkerBox audio initialization put 51.5% of samples in __wasm_longjmp,
+14.2% in the TCI interpreter, and 8% idle. Stack inspection shows FMOD building
+Vorbis decoding tables and loading individual sounds (e.g.
+`Sounds.ipad/ui_element_select.ogg`). This is ongoing initialization, not proof
+of a deadlock. Profile: ignored `target/block-worker.cpuprofile`.
+
+A narrowly scoped experimental Unicorn patch makes WASM ARM SVC helpers record
+the existing exception and request cpu_exit, then return through an explicit
+translated-block exit. Other exceptions keep their existing longjmp behavior;
+native builds are guarded out. Tests now cover stopping, continuing, conditional,
+and unhandled SVCs, plus the existing ARM/Thumb and nested-fiber cases. Build
+and runtime verification of this patch are in progress; the current live game
+still uses the previously verified SVC path.
+
+SVC-return validation: expanded CPU/fiber tests pass in Node and Chromium,
+including conditional, unhandled, continuing, and repeated stopped SVCs. The
+full runtime's headless, texture-state presentation, and VBO/pointer
+presentation fixtures each pass twice. A 50,000-SVC microbenchmark measured
+242.6/233.6 ms using WASM longjmp and 81.6/69.3 ms using ordinary block return.
+This is not a game FPS claim. Logs: `target/svc-return-{node,browser}.log` and
+`target/svc-return-runtime-*.log`.
+
+TinkerBox rendering diagnosis: scene draws were issued with enabled vertex and
+texture-coordinate arrays but no linked shader. Reading the program log showed
+`Fragment shader is not compiled`, with a syntax error in Emscripten's generated
+texture COMBINE code. Its duplicate-texture-load regexp stopped at the first
+closing parenthesis of `(u_textureMatrix0 * v_texCoord0)`, splitting the sample
+expression. The pinned SDK patch uses the already-known complete sample
+expression for deduplication. `web/patch-emscripten.mjs` verifies SDK version and
+applies the patch idempotently as part of `web/build-runtime.mjs`.
+
+A temporary equivalent repair to the live shader generator, with shader-cache
+invalidation, immediately produced the upright TinkerBox terms dialog. Browser
+pointer input dismissed it and the actual main menu rendered. Selecting Puzzles
+started further synchronous image conversion; a playable level is not yet
+verified. This live run uses the earlier block-budget build with the shader
+repair injected diagnostically. A clean patched build is in progress.
+
+The original `--combine` fixture uploads a blue one-pixel texture and renders
+with a texture matrix plus COMBINE mode (replace RGB, modulate alpha). Native
+passes; the previous browser build fails, reproducing the shader defect without
+proprietary assets. Clean patched-browser verification follows the rebuild.
+
+Clean shader-patched build validation (2026-10-21):
+`TOUCHHLE_WEB_DEBUG=1 node web/build-runtime.mjs` completed. With
+`PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs`,
+`TEST_COMBINE=1 node web/test-runtime.mjs` passes twice, as do
+`TEST_PRESENT_BUFFERS=1` and `TEST_GRAPHICS=1`. All report Chromium 141.0.7390.37,
+no page errors, and same-origin GET-only traffic. Logs:
+`target/runtime-combine-after.log`, `target/combine-build-present-buffers.log`,
+`target/combine-build-graphics.log`. `cargo fmt --all -- --check`, JS syntax
+checks for the SDK patch/build scripts, and `git diff --check` pass.
+
+The retained diagnostic game session reached the actual Puzzles category
+screen. Selecting Training entered `PopupStageSelectionForm` construction;
+stack samples progressed from `_inflate` to `Ogre::Image::scale/resize` via
+`SpriteManager::LoadSprite`. This confirms the click was handled and loading
+continues; the unchanged previous frame does not establish a hang or a playable
+level. Screenshots remain ignored under `target/browser-block-inspection/`.
+A second game session (`target/tinkerbox-clean-combine.log`) is running the
+clean shader-patched runtime without injected shader repair. Startup remains
+slow. Next acceptance step: select and interact with the first training level,
+then verify on the clean build. Audio, persistence, all levels, and other
+browsers remain unverified.
+
+Normal (non-diagnostic) `node web/build-runtime.mjs` also completed. Its COMBINE
+regression initially failed at `page.goto` with `ERR_CONNECTION_REFUSED` because
+the static server had expired (`target/combine-release-test.log`). Restarting
+`python3 -m http.server 8765 --bind 127.0.0.1 --directory web/dist` resolved the
+prerequisite; both runs pass (`target/combine-release-test-retry.log`).
+Inspecting the game's sprite-loader call site shows that it unconditionally
+rounds texture dimensions to powers of two before calling Ogre resize; reporting
+an extra NPOT extension would not remove this loading cost. No capability or
+game-code workaround was added.
+
+The Training stage-selection popup subsequently rendered correctly, including
+level 01 and locked later stages. Clicked level 01 to begin its load. The
+screenshot `target/browser-block-inspection/training-current.png` captured the
+stage popup; it is diagnostic evidence, not proof of playable physics.
+
+Level-01 loading exposed another failure in the original retained run:
+`RuntimeError: null function or function signature mismatch` in
+`GLES1OnGL2::PointSize` (`target/tinkerbox-block.log`, at 11304.6 seconds).
+That worker terminated before a level frame rendered. The clean shader build
+independently rendered the terms dialog, main menu, and Puzzles screen before
+any additional live repair (`target/browser-clean-combine/`).
+
+The new original `--points` fixture reproduces the missing PointSize binding.
+An initial fixture used GetIntegerv for POINT_SIZE, which touchHLE's native
+parameter table rejects; corrected to GetFloatv. The corrected native fixture
+passes. A browser-only direct import now invokes Emscripten's existing
+`glPointSize`, and the legacy query shim returns its stored value. Fixed-point
+PointSizex uses the same path; native PointSize keeps the desktop entry point.
+The first browser rebuild stopped crashing but failed the rendered-pixel check:
+the SDK's current-renderer cache reused a triangle shader for points. The post-JS
+shim now invalidates that shortcut when transitioning between points and other
+primitives. A diagnostic generated build passes twice; a clean build is pending.
+The fixture checks float/fixed size, a blue pixel inside the four-pixel point,
+and a neighboring red pixel outside it. Check failures return their ordinal as
+the guest exit status. Logs: `target/runtime-points-before.log`,
+`target/native-points.log` (incorrect query), `target/native-points-corrected.log`,
+`target/native-points-bounds.log`, `target/runtime-points-after.log` (pixel failure),
+`target/runtime-points-diagnostic.log`, `target/runtime-points-shader.log`.
+
+To preserve hours of startup, the second live session received the equivalent
+PointSize/query/cache repair diagnostically. CDP Runtime scope inspection
+(without enabling Debugger) exposed the host table/state. Only the host
+GLES1OnGL2 PointSize binding was redirected to a typed callback using the unused
+GLES1Native PointSize table slot; no guest code or assets changed. The callback
+sets Emscripten's point-size state. This run is now diagnostic, not a clean-build
+game acceptance result. The scripted source fix uses a normal imported binding.
+
+Clean point-size build validation: `TOUCHHLE_WEB_DEBUG=1 node
+web/build-runtime.mjs` completed (`target/points-clean-build.log`). The extended
+`TEST_POINTS=1` fixture passes twice in Chromium 141.0.7390.37 with same-origin
+GET-only traffic and no page errors (`target/runtime-points-clean.log`). Native
+unit tests remain 30/30 passing with `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test
+--lib -- --skip test_app` (`target/points-native-tests.log`). A fresh game run
+using the built-in point and COMBINE fixes is underway in
+`target/browser-clean-points/`; the retained diagnostic session is loading the
+Training selector again. Playable physics remains unverified.
+
+The clean point build also passes `TEST_PRESENT_BUFFERS=1` twice with no page
+errors and same-origin GET-only traffic (`target/points-clean-presentation.log`).
+Formatting, JS syntax checks, and `git diff --check` pass. The older session's
+menu was a clean shader result, but its continuing level attempt includes the
+explicit diagnostic point repair; keep this provenance distinct from the fresh
+fully built-in run at `target/tinkerbox-clean-points.log`.
+
+The next retained session passed PointSize and failed at PointParameterfv
+(`target/tinkerbox-clean-combine.log`, 14202.1 seconds), again before a level
+frame. Added browser point-parameter state/imports for scalar/vector float and
+fixed-point calls, legacy queries, and a pinned SDK shader patch for eye-space
+distance attenuation and min/max size clamping. Fade threshold is retained and
+queryable, but multisampled point fading is not implemented or verified.
+Native entry points remain intact. `--point-parameters` checks query state,
+constant attenuation independently of limits, and a large point constrained by
+the max-size limit against actual pixels. It passes natively
+(`target/native-point-parameters-final.log`). The original fixture exceeded its
+2 KiB code/literal area at first; sharing identical ARM literal-pool values
+resolved that without moving its Mach-O sections. Browser compilation/testing
+is in progress. The previous browser build reproduces the missing binding
+(`target/point-parameters-before.log`).
+
+The third game session reached its terms dialog on the fully built-in point-size
+build. It now has the equivalent point-parameter repair injected diagnostically
+via typed host callbacks and shader/uniform hooks. A local ignored screenshot
+matcher advances only the four already verified menu screens after two matching
+captures, to avoid losing hours waiting at prompts. It does not infer gameplay
+success or act on unrecognized screens. Driver: `/tmp/touchhle-menu-driver.py`;
+log: `target/point-session-menu-driver.log`. The normal point-size build passed
+its point fixture twice (`target/points-release-test.log`) before these newer
+parameter changes. Gameplay acceptance is still pending.
+
+The clean point-parameter build completed (`target/point-parameters-build.log`).
+`TEST_POINT_PARAMETERS=1 node web/test-runtime.mjs` passes twice in Chromium
+141.0.7390.37, with no page errors and only same-origin GET requests
+(`target/point-parameters-after.log`). Native unit tests pass 30/30
+(`target/point-parameters-native-tests.log`). A fresh unmodified runtime session
+with all current fixes and the guarded menu driver is running:
+`target/tinkerbox-clean-parameters.log`, screenshots in
+`target/browser-clean-parameters/`, driver log `target/parameters-menu-driver.log`.
+The older session with injected point-parameter repair remains diagnostic.
+
+After point-parameter support, COMBINE, presentation/VBO/pointer, and basic point
+fixtures each pass twice (`target/parameters-{combine,presentation,points}-test.log`).
+Those fixtures were regenerated with the deduplicated literal pool. The normal
+non-diagnostic build completed (`target/parameters-release-build.log`) and its
+point-parameter fixture passes twice (`target/parameters-release-test.log`).
+Formatting, JS syntax checks, and `git diff --check` pass. The generated normal
+runtime is served locally on port 8765. The fully built-in graphical game run
+still has not reached verified gameplay; do not present these regressions as
+that acceptance result.
+
+A further original `--lighting` fixture exercises normal arrays, material
+ambient/diffuse, global ambient, light diffuse, and enabled fixed-function
+lighting. It verifies an actual lit red triangle pixel. The existing runtime
+passes twice in Chromium with no page errors and GET-only local traffic
+(`TEST_LIGHTING=1`, `target/browser-lighting.log`); native also passes
+(`target/native-lighting.log`). No runtime change was needed for this fixture.
+This is additional 3D-path coverage while the actual game loads, not a substitute
+for gameplay verification.
+
+The page now shows elapsed session time while an IPA is active and explains
+that startup/level loading can take many minutes. It is a timer, not an inferred
+loading percentage or a claim that the guest has reached gameplay. Stop/exit
+clears it. The existing two-run point-parameter integration check passes with
+this shell change (`target/elapsed-ui-runtime-test.log`). No new dependencies.
+
+Actual game audio-path evidence: a non-mutating observer of AudioBridge.handle
+in the fresh point-parameter run counted 51 PCM buffers and 51 source starts,
+24 kHz samples, 13,051 nonzero values among 13,056 sampled values (sampling every
+16th value), peak 0.291229248, sum of squares 27.166671621. The AudioContext was
+`running`. This confirms actual TinkerBox PCM reaches browser scheduling; it is
+not a human listening/synchronization check. The observer retains statistics
+only, not game audio assets (`/tmp/touchhle-audio-observe.js`).
+
+Level-loading bottleneck sample (third diagnostic session): main-thread frames
+show `MusicAsSoundEffect::Load` called by `GameHudPuzzleForm::onFormOpen`, then
+FMOD SoundI::read/createSound and `_ov_read_filter`. This is full guest Vorbis
+music decoding, not idle waiting for a network response. Keep this separate
+from graphics failures when assessing a frozen previous frame.
+
+The third diagnostic session reached indexed level drawing after music decode,
+then aborted on `glMaterialfv: TODO: 5632` (GL_EMISSION), at 6765.2 seconds in
+`target/tinkerbox-clean-points.log`. Emscripten already stores emission and
+uploads it to its lighting shader; only the setter case was missing. Added the
+pinned `emscripten-material-emission.patch`. The lighting fixture now sets
+ambient, diffuse, specular, shininess, and green emission and checks the resulting
+yellow pixel. Native passes (`target/native-emission.log`); the previous browser
+build reproduces the exact abort (`target/emission-before.log`). A clean build
+is underway. The retained point-parameter session received an equivalent typed
+wrapper around its actual material setter, preserving other cases and writing
+the existing emission state. It is now diagnostic; no guest code changed.
+
+The point-parameter SDK patch also supplies neutral parameter defaults when
+used by an SDK consumer without touchHLE's post-JS state shim. This avoids
+breaking that consumer's ordinary point rendering. touchHLE initializes its
+own state as before; the fallback does not change that path.
+
+Emission validation: the clean scripted build completed (`target/emission-build.log`)
+and `TEST_LIGHTING=1 node web/test-runtime.mjs` passes twice in Chromium with no
+page errors and same-origin GET-only requests (`target/emission-after.log`).
+The final native fixture also verifies blue is zero (`target/native-emission-final.log`).
+A new unmodified runtime game run includes all current fixes and the guarded
+menu driver: `target/tinkerbox-clean-emission.log`, screenshots in
+`target/browser-clean-emission/`, driver log `target/emission-menu-driver.log`.
+The retained parameter run has the explicit emission repair injected and is
+not a clean-build acceptance result. No playable level is verified yet.
+
+The retained parameter run and the unmodified emission run both progressed to
+scalar Materialf, then failed with `null function or function signature mismatch`
+(`target/tinkerbox-clean-parameters.log` at 2828.0 seconds;
+`target/tinkerbox-clean-emission.log` at 2566.4 seconds). Browser Materialf now
+uses the existing Materialfv implementation with a one-element host float;
+Materialx converts through the same method. Native Materialf retains its entry
+point. The lighting fixture now exercises both scalar variants plus blue
+specular, red diffuse, and green emission, checking a white pixel. Native passes
+(`target/native-material-scalar.log`); the previous browser reproduces the
+missing binding (`target/material-scalar-before.log`); the clean browser build
+passes twice (`target/material-scalar-after.log`). A new clean game session is
+running in `target/browser-clean-material/`, with log
+`target/tinkerbox-clean-material.log` and guarded driver
+`target/material-menu-driver.log`. The previous workers exited on their errors.
+
+Browser binding audit and fog/buffer mapping follow-up:
+- Compared TinkerBox's 104 imported GL symbols against initialized GLES1OnGL2
+  WASM function-pointer slots. The audit identified absent Fogf/Fogfv, Lightf,
+  and MapBuffer/UnmapBuffer (also used internally by DrawElements). It checks
+  potential branches, not whether every import actually executes.
+- Explicit fog imports call the pinned SDK's existing implementations. The
+  original `--fog` fixture exercises scalar float/fixed values, enum conversion,
+  vector color, and a fully fogged blue pixel. Native passed in
+  `target/native-fog.log`; the prior browser reproduced a missing binding in
+  `target/fog-before.log`. The clean diagnostic build passes twice in Chromium
+  141 (`target/fog-after.log`).
+- WebGL2 mapping uses a malloc-backed shadow populated with getBufferSubData;
+  unmap uploads modifications and frees it. BUFFER_ACCESS/BUFFER_MAPPED queries
+  reflect this state. The `--mapped` fixture modifies a VBO across two mappings,
+  preserves untouched vertices, rejects duplicate mapping, checks state, and
+  verifies a blue triangle. Native passed (`target/native-mapped.log`); the old
+  browser failed (`target/mapped-before.log`); the clean browser passes twice
+  (`target/mapped-after.log`). Both browser tests had no page errors and only
+  same-origin GET traffic. Deletion while mapped and full GL conformance are
+  not verified.
+- Build: `TOUCHHLE_WEB_DEBUG=1 node web/build-runtime.mjs`, log
+  `target/fog-mapped-build.log`. `cargo test --lib`: 30 passed, zero failed
+  (`target/fog-mapped-native-tests.log`); `cargo fmt --all -- --check` passed.
+
+Light parameter work in progress: the SDK lacks scalar light setters and its
+shader ignores attenuation/spotlights. Added a pinned SDK patch and explicit
+float/vector imports, preserving native calls. Original `--light-attenuation`
+and `--light-spot` fixtures compare constant attenuation and a spotlight facing
+away from a triangle, including float/fixed setters. Both pass natively
+(`target/native-light-attenuation.log`, `target/native-light-spot.log`); the
+preceding browser fails at the missing scalar binding
+(`target/light-attenuation-before.log`). Browser validation is pending the
+build in `target/light-parameters-build.log`. No playable TinkerBox level is
+verified yet; the retained material session continues loading.
+
+The light-parameter diagnostic build succeeded. Chromium 141 passes each of
+`TEST_LIGHT_ATTENUATION=1`, `TEST_LIGHT_SPOT=1`, and `TEST_LIGHTING=1` twice
+(`target/light-attenuation-after.log`, `target/light-spot-after.log`,
+`target/light-regression.log`), with no page errors and local GET-only traffic.
+The new shader distinguishes positional/directional lights, applies distance
+attenuation and spotlight cone/exponent state, and transforms spot directions
+at setter time. Full lighting conformance (including two-sided lighting) is
+not claimed. Native unit tests remain 30/30 (`target/light-native-tests.log`);
+formatting, JS syntax checks and `git diff --check` pass. A fresh clean game
+session is running in `target/browser-clean-light/`, log
+`target/tinkerbox-clean-light.log`, guarded driver `target/light-menu-driver.log`.
+
+Initialized binding audit of the clean light build found no missing function
+slots among TinkerBox's imported GL methods (`target/light-binding-audit.json`,
+matched to `target/light-audit-runtime.wat`). Other GLES methods retain missing
+bindings; this is an import-specific audit, not general GLES completeness or
+proof of gameplay. Lightx/Lightxv's unused integer conversion branches still
+show missing desktop integer setters; the table's light parameters all use
+float conversion, exercised by the native/browser fixed-point fixture.
+
+Normal (non-diagnostic) runtime build also succeeded
+(`target/light-release-build.log`). FOG, MAPPED, LIGHTING, LIGHT_ATTENUATION,
+LIGHT_SPOT, POINT_PARAMETERS, and COMBINE each passed twice with the same
+Chromium/static-GET checks; logs are `target/release-<lowercase flag>.log`.
+All four SDK patches applied in order to pristine pinned libglemu.js reproduced
+the SDK source byte-for-byte. The optimized native build succeeds
+(`target/native-game-release-build.log`), retaining existing stb warnings.
+Native Xvfb/null-audio reference accepted terms and traversed Puzzles → Training
+→ 01 (`target/native-game-release.log`, `target/native-menu-driver.log`);
+level loading is still in progress. The earlier debug native comparison was
+terminated during startup to use the optimized reference; not a crash/pass.
+
+2026-10-22 game result and follow-up:
+- The retained material build failed at Lightf at 3464.4 seconds
+  (`target/tinkerbox-clean-material.log`), confirming the audit's prediction.
+- The clean light build rendered Training 01 and accepted Play. Screenshots
+  `target/browser-clean-light/level-current.png` and `level-play.png` show the
+  scene, the pause control, and a moving ball. Objects were incorrectly black.
+  The optimized native reference renders the textures correctly
+  (`target/native-game-reference.png`, `target/native-game-release.log`).
+- A draw-state capture showed valid lighting uniforms and interleaved arrays,
+  but all black objects used mipmapped texture filters. Generating the chains
+  on four bound textures restored their appearance. This was a diagnostic
+  repair; the session must not be reported as a clean textured gameplay pass.
+  It progressed to the pinch tutorial (`level-mipmap-fix.png`).
+- TexEnvf was also ignoring enum-valued TEXTURE_ENV_MODE=MODULATE. Float/vector
+  scalar setters now delegate to the SDK's integer state hook; color vectors
+  and float scale values keep their existing paths. The COMBINE fixture tests
+  both float variants and passes natively (`target/native-texenv-float.log`).
+- GL_GENERATE_MIPMAP is now tracked per WebGL texture. Valid base-level image,
+  subimage and copy writes regenerate the chain; the getter exposes the flag.
+  The original --mipmap fixture verifies its default/set value, a blue texture
+  under minification, then a red subimage update under minification. Native
+  passes (`target/native-mipmap-minified.log`). Browser tests initially failed
+  with ERR_CONNECTION_REFUSED because the static server had exited
+  (`target/mipmap-before.log`, `target/texenv-float-before.log`); these were
+  infrastructure failures, not reproduction of GL failures. After restarting
+  the server and building, both fixtures pass twice in Chromium
+  (`target/mipmap-after.log`, `target/texenv-float-after.log`).
+- Input now retains independent touch IDs and forwards normalized SDL finger
+  events. Mouse-wheel steps become paired pinch gestures; ordinary mouse input
+  retains its existing route. Three JS input tests pass. The actual SDL adapter
+  test caught SDL_PushEvent replacing timestamps, which can merge motion steps;
+  touch insertion now uses SDL_PeepEvents with SDL_ADDEVENT to preserve batches.
+  The first failed adapter tests are retained in `target/touch-adapter-node.log`
+  and `target/touch-adapter-browser.log`; corrected tests/build are pending.
+
+The corrected adapter passed in Node and Chromium 141
+(`target/touch-adapter-node-final.log`, `target/touch-adapter-browser-final.log`).
+A second Node-only test failure was the test leaving SDL's end-of-poll-cycle
+sentinel queued before adding the next batch; the test now drains each poll
+cycle, as the actual event loop does. The failed intermediate log is
+`target/touch-adapter-node-after.log`. Three JS input tests also pass
+(`node --test web/test/input.test.mjs`). The current runtime build began before
+the timestamp correction and must be rebuilt once it completes.
+
+The retained game session's audio observer counted 2,740 PCM buffers/starts,
+677,975 nonzero sampled values out of 701,440, peak 0.985 at 24 kHz, with its
+AudioContext running. This verifies actual game PCM delivery, not human
+listening or audiovisual synchronization. The observer does not alter PCM.
+The optimized native reference also advanced from Play to the pinch tutorial
+(`target/native-after-play.png`). It was then terminated intentionally after
+capturing the reference, to release CPU resources for browser validation.
+
+Clean game acceptance (no injected repairs):
+- Build `target/touch-mipmap-final-build.log` includes all graphics fixes and
+  the timestamp-preserving touch adapter. Its MIPMAP and float COMBINE checks
+  pass twice (`target/final-mipmap-runtime.log`, `target/final-combine-runtime.log`).
+  Two preceding smoke-check attempts again hit a stopped server; their logs
+  `target/touch-*-runtime*.log` retain ERR_CONNECTION_REFUSED. The server now
+  runs in a persistent terminal session, verified by HTTP 200.
+- `target/tinkerbox-clean-mipmap-touch.log`, screenshots under
+  `target/browser-clean-mipmap-touch/`, and `target/mipmap-touch-driver.log`
+  record the clean run. Terms clicked at 1029s, Puzzles at 1061s, Training at
+  1301s, stage 01 at 1658s, Play at 3394s, and wheel pinch at 3921s. Each driver
+  action required two matching screenshots. `level-01.png` shows the correctly
+  textured ball, ramps and bucket. The first simulation completed and Lesson 2
+  appeared. Wheel delta +480 zoomed out to reveal its placement area.
+- Opening the element tray and using browser touch input dragged the ball into
+  the placement circle (`valid-drag.png`). The game holds an object above the
+  finger: earlier mouse drops placed it outside the valid region and were
+  cancelled, rather than proving an input failure. The valid touch was released
+  and Play clicked to test the second simulation; its result is pending.
+- The run uses diagnostic exports only for observation. No function-table,
+  texture, shader, or guest-memory repairs were applied to this worker.
+- The first final normal-build process terminated with status 143 during
+  linking (`target/final-release-build.log`); it is being retried in a persistent
+  terminal (`target/final-release-build-retry.log`). This is not a build pass.
+
+
+Clean Lesson 2 acceptance: browser touch input dragged the ball from the tray
+into the placement region, release placed it, and Play simulated it into the
+bucket. The actual game displayed SUCCESS, captured in
+`target/browser-clean-mipmap-touch/lesson2-result.png`. This verifies two
+training simulations and a user-created placement, without live runtime
+repairs. Later lessons, other IPAs, real-time performance and persistent saves
+remain outside the demonstrated result.
+
+The final normal runtime retry succeeds (`target/final-release-build-retry.log`).
+`npm run build` and `npm test` succeed (7 tests, zero failures), recorded in
+`target/final-web-build.log` and `target/final-web-tests.log`. The final normal
+runtime graphics suite is in progress in `target/final-release-*.log`.
+
+Final normal-runtime checks completed: MIPMAP, COMBINE (float enum setters),
+LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED, and POINT_PARAMETERS each
+passed twice in Chromium 141, without page errors and with same-origin GET-only
+requests (`target/final-release-<lowercase flag>.log`). Formatting and
+`git diff --check` pass. The static app responds HTTP 200 at 127.0.0.1:8765.
+The clean game's audio observer additionally saw 52 PCM buffers/starts at
+24 kHz, 13,307 nonzero sampled values of 13,312, peak 0.689, AudioContext running.
+The diagnostic game remains available on inspector port 9236; static dist now
+contains the normal build, not the diagnostic export build.
+
+Next work: profile and improve guest CPU/codec performance without bypassing
+execution; validate later training levels and real touch hardware; implement
+and test persistent local saves; broaden graphics conformance and other browser
+coverage. T3 preview remains unavailable due host sandbox restrictions; its
+HTML preview also exited unexpectedly. The documented standalone Chromium
+workflow supplied the actual gameplay and regression evidence.
+
+2026-10-26 acceleration project started:
+Requirements, architecture, functional design and progress are tracked in
+[wasm-jit/PRD.md](wasm-jit/PRD.md), [wasm-jit/SAD.md](wasm-jit/SAD.md),
+[wasm-jit/SFDS.md](wasm-jit/SFDS.md) and
+[wasm-jit/PROGRESS.md](wasm-jit/PROGRESS.md). The thread goal is active. Reuse
+Unicorn's translation semantics where feasible; benchmark before selecting the
+final compiler seam. Historical first Play at 3,394 seconds includes manual
+interaction and is not a controlled load benchmark. No JIT speedup claimed yet.
+
+Acceleration baseline checks (2026-10-26): `cargo fmt --all --check`,
+`git diff --check`, `cargo test --locked -p touchhle-browser` (9 tests),
+`CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo test --lib -- --skip test_app`
+(30 tests), and `cd web && npm run build && npm test` (7 tests) pass.
+The pre-existing browser integration is being committed as the preserved source
+baseline, separately from the acceleration design and implementation.

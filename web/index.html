@@ -8,9 +8,15 @@
 <main>
   <h1>touchHLE-web</h1>
   <p>Client-side iPhone OS emulation, in development.</p>
-  <p>This page tests the ARM WebAssembly backend on your device. It does not run games yet.</p>
+  <p>Experimental browser runtime. Compatibility and performance vary by app. Startup and level loading can take many minutes.</p>
   <button id="test">Test browser CPU</button>
+  <p><label>Validate local IPA (up to 256 MiB): <input id="ipa" type="file" accept=".ipa"></label></p>
+  <p><label><input id="headless" type="checkbox"> Headless diagnostics</label></p>
+  <canvas id="canvas" width="1024" height="768"></canvas>
+  <p>Click or tap to interact. Use two fingers to pinch, or scroll over the game to zoom.</p>
+  <button id="run" disabled>Run IPA</button>
   <button id="stop" disabled>Stop</button>
+  <p id="runtime-state" hidden></p>
   <pre id="status" role="status" aria-live="polite">Ready.</pre>
   <p>No server-side execution or file uploads. All test code executes in a browser worker.</p>
 </main>

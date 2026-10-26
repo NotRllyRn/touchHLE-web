@@ -207,7 +207,13 @@ unsafe impl<T, const MUT: bool> SafeRead for Ptr<T, MUT> {}
 pub trait SafeWrite: Sized {}
 impl<T: SafeRead> SafeWrite for T {}
 
+#[cfg(not(target_os = "emscripten"))]
 type Bytes = [u8; 1 << 32];
+#[cfg(target_os = "emscripten")]
+#[path = "browser/src/memory.rs"]
+mod browser_memory;
+#[cfg(target_os = "emscripten")]
+const WEB_LOW_END: u32 = 256 * 1024 * 1024;
 
 pub const PAGE_SIZE: GuestUSize = 4096;
 pub const PAGE_SIZE_ALIGN_MASK: GuestUSize = 0xfff;
@@ -235,7 +241,10 @@ pub struct Mem {
     /// Note that unless direct memory access is disabled, the CPU emulation
     /// (dynarmic) accesses memory via this pointer directly except when a page
     /// fault occurs.
+    #[cfg(not(target_os = "emscripten"))]
     bytes: *mut Bytes,
+    #[cfg(target_os = "emscripten")]
+    web: browser_memory::GuestMemory,
 
     /// The size of the __PAGE_ZERO segment, where pointer accesses are trapped
     /// to prevent null pointer derefrences.
@@ -255,6 +264,7 @@ pub struct Mem {
     pub(super) zero_memory_on_free: bool,
 }
 
+#[cfg(not(target_os = "emscripten"))]
 impl Drop for Mem {
     fn drop(&mut self) {
         unsafe {
@@ -278,6 +288,7 @@ impl Mem {
     pub const SECONDARY_THREAD_DEFAULT_STACK_SIZE: GuestUSize = 512 * 1024;
 
     /// Create a fresh instance of guest memory.
+    #[cfg(not(target_os = "emscripten"))]
     pub fn new() -> Mem {
         let size = std::mem::size_of::<Bytes>();
 
@@ -300,6 +311,31 @@ impl Mem {
             heap_allocator: None,
             zero_memory_on_free: true,
         }
+    }
+
+    /// Bounded browser address map: low 256 MiB plus the original high stack.
+    /// Storage never moves; unsupported addresses fail instead of wrapping.
+    #[cfg(target_os = "emscripten")]
+    pub fn new() -> Mem {
+        let mut web = browser_memory::GuestMemory::new(384 * 1024 * 1024);
+        web.map(PAGE_SIZE, WEB_LOW_END - PAGE_SIZE).unwrap();
+        web.map(
+            Self::MAIN_THREAD_STACK_LOW_END,
+            Self::MAIN_THREAD_STACK_SIZE,
+        )
+        .unwrap();
+        Mem {
+            web,
+            null_segment_size: 0,
+            vm_allocator: VMAllocator::new(0, WEB_LOW_END),
+            heap_allocator: None,
+            zero_memory_on_free: true,
+        }
+    }
+
+    #[cfg(target_os = "emscripten")]
+    pub fn web_mappings(&mut self) -> Vec<(u32, usize, *mut u8)> {
+        self.web.mappings()
     }
 
     pub fn create_heap(&mut self, size: GuestUSize) -> HeapAllocator {
@@ -340,12 +376,21 @@ impl Mem {
     /// of [Mem]. You must not use it while a `&mut` is held on some region of
     /// guest memory.
     pub unsafe fn direct_memory_access_ptr(&mut self) -> *mut std::ffi::c_void {
-        self.bytes.cast()
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            self.bytes.cast()
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            std::ptr::null_mut()
+        }
     }
 
+    #[cfg(not(target_os = "emscripten"))]
     fn bytes(&self) -> &Bytes {
         unsafe { &*self.bytes }
     }
+    #[cfg(not(target_os = "emscripten"))]
     fn bytes_mut(&mut self) -> &mut Bytes {
         unsafe { &mut *self.bytes }
     }
@@ -363,9 +408,16 @@ impl Mem {
         if addr.to_bits() < self.null_segment_size {
             return None;
         }
-        self.bytes()
-            .get(addr.to_bits() as usize..)?
-            .get(..count as usize)
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            self.bytes()
+                .get(addr.to_bits() as usize..)?
+                .get(..count as usize)
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            self.web.slice(addr.to_bits(), count as usize).ok()
+        }
     }
     /// Special version of [Self::bytes_at_mut] that returns [None] rather than
     /// panicking on failure. Only for use by [crate::gdb::GdbServer].
@@ -377,9 +429,16 @@ impl Mem {
         if addr.to_bits() < self.null_segment_size {
             return None;
         }
-        self.bytes_mut()
-            .get_mut(addr.to_bits() as usize..)?
-            .get_mut(..count as usize)
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            self.bytes_mut()
+                .get_mut(addr.to_bits() as usize..)?
+                .get_mut(..count as usize)
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            self.web.slice_mut(addr.to_bits(), count as usize).ok()
+        }
     }
 
     /// Get a slice for reading `count` bytes. This is the basic primitive for
@@ -393,7 +452,16 @@ impl Mem {
         if ptr.to_bits() < self.null_segment_size {
             Self::null_check_fail(ptr.to_bits(), count)
         }
-        &self.bytes()[ptr.to_bits() as usize..][..count as usize]
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            &self.bytes()[ptr.to_bits() as usize..][..count as usize]
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            self.web
+                .slice(ptr.to_bits(), count as usize)
+                .unwrap_or_else(|e| panic!("Guest memory {:#x}+{:#x}: {e}", ptr.to_bits(), count))
+        }
     }
     /// Get a slice for reading `count` bytes without a null-page check.
     ///
@@ -405,7 +473,16 @@ impl Mem {
         ptr: Ptr<u8, MUT>,
         count: GuestUSize,
     ) -> &[u8] {
-        &self.bytes()[ptr.to_bits() as usize..][..count as usize]
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            &self.bytes()[ptr.to_bits() as usize..][..count as usize]
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            self.web
+                .slice(ptr.to_bits(), count as usize)
+                .unwrap_or_else(|e| panic!("Guest memory {:#x}+{:#x}: {e}", ptr.to_bits(), count))
+        }
     }
     /// Get a slice for reading or writing `count` bytes. This is the basic
     /// primitive for safe read-write memory access.
@@ -418,7 +495,16 @@ impl Mem {
         if ptr.to_bits() < self.null_segment_size {
             Self::null_check_fail(ptr.to_bits(), count)
         }
-        &mut self.bytes_mut()[ptr.to_bits() as usize..][..count as usize]
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            &mut self.bytes_mut()[ptr.to_bits() as usize..][..count as usize]
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            self.web
+                .slice_mut(ptr.to_bits(), count as usize)
+                .unwrap_or_else(|e| panic!("Guest memory {:#x}+{:#x}: {e}", ptr.to_bits(), count))
+        }
     }
 
     /// Get a pointer for reading an array of `count` elements of type `T`.
@@ -480,11 +566,22 @@ impl Mem {
     ///
     /// Panics if the host pointer is not addressing a location in guest memory.
     pub fn host_ptr_to_guest_ptr(&self, host_ptr: *const std::ffi::c_void) -> ConstVoidPtr {
-        let host_ptr = host_ptr.cast::<u8>();
-        let guest_mem_range = self.bytes().as_ptr_range();
-        assert!(guest_mem_range.contains(&host_ptr));
-        let guest_addr = host_ptr as usize - guest_mem_range.start as usize;
-        Ptr::from_bits(u32::try_from(guest_addr).unwrap())
+        #[cfg(target_os = "emscripten")]
+        {
+            Ptr::from_bits(
+                self.web
+                    .guest_address(host_ptr.cast())
+                    .expect("Pointer is outside guest memory"),
+            )
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            let host_ptr = host_ptr.cast::<u8>();
+            let guest_mem_range = self.bytes().as_ptr_range();
+            assert!(guest_mem_range.contains(&host_ptr));
+            let guest_addr = host_ptr as usize - guest_mem_range.start as usize;
+            Ptr::from_bits(u32::try_from(guest_addr).unwrap())
+        }
     }
 
     /// Read a value for memory. This is the preferred way to read memory in
@@ -516,11 +613,25 @@ impl Mem {
 
     /// C-style `memmove`.
     pub fn memmove(&mut self, dest: MutVoidPtr, src: ConstVoidPtr, size: GuestUSize) {
-        let src = src.to_bits() as usize;
-        let dest = dest.to_bits() as usize;
-        let size = size as usize;
-        self.bytes_mut()
-            .copy_within(src..src.checked_add(size).unwrap(), dest)
+        // Native copy_within permits an empty range at address zero. Do not
+        // translate or dereference either guest pointer for an empty copy.
+        if size == 0 {
+            return;
+        }
+        #[cfg(target_os = "emscripten")]
+        unsafe {
+            let source = self.ptr_at(src.cast::<u8>(), size);
+            let destination = self.ptr_at_mut(dest.cast::<u8>(), size);
+            std::ptr::copy(source, destination, size as usize);
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            let src = src.to_bits() as usize;
+            let dest = dest.to_bits() as usize;
+            let size = size as usize;
+            self.bytes_mut()
+                .copy_within(src..src.checked_add(size).unwrap(), dest)
+        }
     }
 
     /// Allocate `size` bytes in the default heap.
@@ -726,6 +837,15 @@ impl Mem {
     /// Permanently mark a region of address space as being unusable to the
     /// memory allocator.
     pub fn reserve(&mut self, base: VAddr, size: GuestUSize) {
+        #[cfg(target_os = "emscripten")]
+        if base >= WEB_LOW_END {
+            // Fixed-address dylibs live outside the bounded allocation arena.
+            // Never hand their address gaps to the ordinary heap allocator.
+            self.web
+                .map(base, size.next_multiple_of(PAGE_SIZE))
+                .unwrap();
+            return;
+        }
         self.vm_allocator.allocate(Some(base), size).unwrap();
     }
 

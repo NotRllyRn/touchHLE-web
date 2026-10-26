@@ -1,0 +1,123 @@
+--- a/src/lib/libglemu.js
++++ b/src/lib/libglemu.js
+@@ -104,7 +104,9 @@
+     lightDiffuse: [],
+     lightSpecular: [],
+     lightPosition: [],
+-    // TODO attenuation modes of lights
++    lightAttenuation: [],
++    lightSpot: [],
++    lightSpotDirection: [],
+ 
+     // GL_ALPHA_TEST support
+     alphaTestEnabled: false,
+@@ -184,6 +186,9 @@
+         GLEmulation.lightDiffuse[lightId] = lightId ? new Float32Array([0.0, 0.0, 0.0, 1.0]) : new Float32Array([1.0, 1.0, 1.0, 1.0]);
+         GLEmulation.lightSpecular[lightId] = lightId ? new Float32Array([0.0, 0.0, 0.0, 1.0]) : new Float32Array([1.0, 1.0, 1.0, 1.0]);
+         GLEmulation.lightPosition[lightId] = new Float32Array([0.0, 0.0, 1.0, 0.0]);
++        GLEmulation.lightAttenuation[lightId] = new Float32Array([1, 0, 0]);
++        GLEmulation.lightSpot[lightId] = new Float32Array([0, -1]); // exponent, cos(cutoff); -1 means 180 degrees
++        GLEmulation.lightSpotDirection[lightId] = new Float32Array([0, 0, -1]);
+       }
+ 
+ 
+@@ -2273,9 +2278,19 @@
+                   vsLightingDefs += 'uniform vec4 u_lightDiffuse' + lightId + ';';
+                   vsLightingDefs += 'uniform vec4 u_lightSpecular' + lightId + ';';
+                   vsLightingDefs += 'uniform vec4 u_lightPosition' + lightId + ';';
++                  vsLightingDefs += 'uniform vec3 u_lightAttenuation' + lightId + ';';
++                  vsLightingDefs += 'uniform vec2 u_lightSpot' + lightId + ';';
++                  vsLightingDefs += 'uniform vec3 u_lightSpotDirection' + lightId + ';';
+ 
+                   vsLightingPass += '  {';
+-                  vsLightingPass += '    vec3 lightDirection = normalize(u_lightPosition' + lightId + ').xyz;';
++                  vsLightingPass += '    vec3 delta = u_lightPosition' + lightId + '.w == 0.0 ? u_lightPosition' + lightId + '.xyz : u_lightPosition' + lightId + '.xyz / u_lightPosition' + lightId + '.w - ecPosition.xyz;';
++                  vsLightingPass += '    float distanceToLight = length(delta);';
++                  vsLightingPass += '    vec3 lightDirection = normalize(delta);';
++                  vsLightingPass += '    float attenuation = u_lightPosition' + lightId + '.w == 0.0 ? 1.0 : 1.0 / dot(u_lightAttenuation' + lightId + ', vec3(1.0, distanceToLight, distanceToLight * distanceToLight));';
++                  vsLightingPass += '    if (u_lightSpot' + lightId + '.y >= 0.0) {';
++                  vsLightingPass += '      float spot = max(dot(-lightDirection, normalize(u_lightSpotDirection' + lightId + ')), 0.0);';
++                  vsLightingPass += '      attenuation *= spot < u_lightSpot' + lightId + '.y ? 0.0 : (u_lightSpot' + lightId + '.x == 0.0 ? 1.0 : pow(spot, u_lightSpot' + lightId + '.x));';
++                  vsLightingPass += '    }';
+                   vsLightingPass += '    vec3 halfVector = normalize(lightDirection + vec3(0,0,1));';
+                   vsLightingPass += '    vec3 ambient = u_lightAmbient' + lightId + '.xyz * u_materialAmbient.xyz;';
+                   vsLightingPass += '    float diffuseI = max(dot(ecNormal, lightDirection), 0.0);';
+@@ -2283,7 +2298,7 @@
+                   vsLightingPass += '    vec3 diffuse = diffuseI * u_lightDiffuse' + lightId + '.xyz * u_materialDiffuse.xyz;';
+                   vsLightingPass += '    specularI = (diffuseI > 0.0 && specularI > 0.0) ? exp(u_materialShininess * log(specularI)) : 0.0;';
+                   vsLightingPass += '    vec3 specular = specularI * u_lightSpecular' + lightId + '.xyz * u_materialSpecular.xyz;';
+-                  vsLightingPass += '    v_color.xyz += ambient + diffuse + specular;';
++                  vsLightingPass += '    v_color.xyz += attenuation * (ambient + diffuse + specular);';
+                   vsLightingPass += '  }';
+                 }
+               }
+@@ -2500,12 +2515,18 @@
+           this.lightAmbientLocation = []
+           this.lightDiffuseLocation = []
+           this.lightSpecularLocation = []
++          this.lightAttenuationLocation = [];
++          this.lightSpotLocation = [];
++          this.lightSpotDirectionLocation = [];
+           this.lightPositionLocation = []
+           for (var lightId = 0; lightId < GLEmulation.MAX_LIGHTS; lightId++) {
+             this.lightAmbientLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightAmbient${lightId}`);
+             this.lightDiffuseLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightDiffuse${lightId}`);
+             this.lightSpecularLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightSpecular${lightId}`);
+             this.lightPositionLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightPosition${lightId}`);
++            this.lightSpotDirectionLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightSpotDirection${lightId}`);
++            this.lightSpotLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightSpot${lightId}`);
++            this.lightAttenuationLocation[lightId] = GLctx.getUniformLocation(this.program, `u_lightAttenuation${lightId}`);
+           }
+ 
+           this.hasAlphaTest = GLEmulation.alphaTestEnabled;
+@@ -2691,6 +2712,9 @@
+               if (this.lightDiffuseLocation[lightId]) GLctx.uniform4fv(this.lightDiffuseLocation[lightId], GLEmulation.lightDiffuse[lightId]);
+               if (this.lightSpecularLocation[lightId]) GLctx.uniform4fv(this.lightSpecularLocation[lightId], GLEmulation.lightSpecular[lightId]);
+               if (this.lightPositionLocation[lightId]) GLctx.uniform4fv(this.lightPositionLocation[lightId], GLEmulation.lightPosition[lightId]);
++              if (this.lightSpotDirectionLocation[lightId]) GLctx.uniform3fv(this.lightSpotDirectionLocation[lightId], GLEmulation.lightSpotDirection[lightId]);
++              if (this.lightSpotLocation[lightId]) GLctx.uniform2fv(this.lightSpotLocation[lightId], GLEmulation.lightSpot[lightId]);
++              if (this.lightAttenuationLocation[lightId]) GLctx.uniform3fv(this.lightAttenuationLocation[lightId], GLEmulation.lightAttenuation[lightId]);
+             }
+           }
+ 
+@@ -3769,6 +3793,23 @@
+     }
+   },
+ 
++  glLightf__deps: ['$GL'],
++  glLightf: (light, pname, param) => {
++    if (light < 0x4000 || light >= 0x4008) { GL.recordError(0x0500); return; }
++    var id = light - 0x4000;
++    if (pname >= 0x1207 && pname <= 0x1209) {
++      if (param < 0) { GL.recordError(0x0501); return; }
++      GLEmulation.lightAttenuation[id][pname - 0x1207] = param;
++    } else if (pname == 0x1205) {
++      if (!(param >= 0 && param <= 128)) { GL.recordError(0x0501); return; }
++      GLEmulation.lightSpot[id][0] = param;
++    } else if (pname == 0x1206) {
++      if (param != 180 && !(param >= 0 && param <= 90)) { GL.recordError(0x0501); return; }
++      GLEmulation.lightSpot[id][1] = param == 180 ? -1 : Math.cos(param * Math.PI / 180);
++    } else { GL.recordError(0x0500); }
++  },
++
++  glLightfv__deps: ['glLightf'],
+   glLightfv: (light, pname, param) => {
+     if ((light >= 0x4000) && (light < 0x4008)  /* GL_LIGHT0 to GL_LIGHT7 */) {
+       var lightId = light - 0x4000;
+@@ -3796,8 +3837,15 @@
+ 
+         // multiply position with current modelviewmatrix
+         GLImmediate.matrixLib.mat4.multiplyVec4(GLImmediate.matrix[0], GLEmulation.lightPosition[lightId]);
++      } else if (pname == 0x1204) { // GL_SPOT_DIRECTION: inverse transpose of modelview's linear part
++        var direction = [HEAPF32[param >> 2], HEAPF32[(param >> 2) + 1], HEAPF32[(param >> 2) + 2], 0];
++        var inverse = GLImmediate.matrixLib.mat4.create(GLImmediate.matrix[0]);
++        GLImmediate.matrixLib.mat4.inverse(inverse);
++        GLImmediate.matrixLib.mat4.transpose(inverse);
++        GLImmediate.matrixLib.mat4.multiplyVec4(inverse, direction);
++        GLEmulation.lightSpotDirection[lightId].set(direction.slice(0, 3));
+       } else {
+-        abort('glLightfv: TODO: ' + pname);
++        _glLightf(light, pname, HEAPF32[param >> 2]);
+       }
+     }
+   },

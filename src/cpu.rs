@@ -14,7 +14,34 @@ use crate::abi::GuestFunction;
 use crate::mem::{ConstPtr, GuestUSize, Mem, MutPtr, Ptr, SafeRead, SafeWrite};
 
 // Import functions from C++
+#[cfg(not(target_os = "emscripten"))]
 use touchHLE_dynarmic_wrapper::*;
+#[cfg(target_os = "emscripten")]
+#[path = "cpu/dynarmic_wrapper/lib.rs"]
+mod backend_abi;
+#[cfg(target_os = "emscripten")]
+use backend_abi::*;
+
+#[cfg(target_os = "emscripten")]
+#[no_mangle]
+unsafe extern "C" fn touchHLE_web_map_memory(mem: *mut Mem, cpu: *mut touchHLE_DynarmicWrapper) {
+    extern "C" {
+        fn touchHLE_web_map(
+            cpu: *mut touchHLE_DynarmicWrapper,
+            base: u32,
+            len: usize,
+            pointer: *mut u8,
+        );
+    }
+    let mem = &mut *mem;
+    let null_end = mem.null_segment_size();
+    for (base, len, pointer) in mem.web_mappings() {
+        let skip = null_end.saturating_sub(base) as usize;
+        if skip < len {
+            touchHLE_web_map(cpu, base + skip as u32, len - skip, pointer.add(skip));
+        }
+    }
+}
 
 type VAddr = u32;
 pub type CpuContext = touchHLE_DynarmicContext;

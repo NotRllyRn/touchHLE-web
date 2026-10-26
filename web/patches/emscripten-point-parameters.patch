@@ -1,0 +1,38 @@
+--- a/src/lib/libglemu.js
++++ b/src/lib/libglemu.js
+@@ -2230,8 +2230,10 @@
+             var vsPointSizeDefs = null;
+             var vsPointSizeInit = null;
+             if (GLImmediate.mode == GLctx.POINTS) {
+-              vsPointSizeDefs = 'uniform float u_pointSize;\n';
+-              vsPointSizeInit = '  gl_PointSize = u_pointSize;\n';
++              vsPointSizeDefs = 'uniform float u_pointSize;\nuniform vec2 u_pointSizeRange;\nuniform vec3 u_pointAttenuation;\n';
++              vsPointSizeInit = '  float pointDistance = length(ecPosition.xyz);\n' +
++                '  float pointAttenuation = dot(u_pointAttenuation, vec3(1.0, pointDistance, pointDistance * pointDistance));\n' +
++                '  gl_PointSize = clamp(u_pointSize * inversesqrt(pointAttenuation), u_pointSizeRange.x, u_pointSizeRange.y);\n';
+             }
+ 
+             var vsClipPlaneDefs = '';
+@@ -2478,6 +2480,8 @@
+                            this.fogScaleLocation || this.fogDensityLocation);
+ 
+           this.pointSizeLocation = GLctx.getUniformLocation(this.program, 'u_pointSize');
++          this.pointSizeRangeLocation = GLctx.getUniformLocation(this.program, 'u_pointSizeRange');
++          this.pointAttenuationLocation = GLctx.getUniformLocation(this.program, 'u_pointAttenuation');
+ 
+           this.hasClipPlane = false;
+           this.clipPlaneEquationLocation = [];
+@@ -2697,6 +2701,13 @@
+           if (GLImmediate.mode == GLctx.POINTS) {
+             if (this.pointSizeLocation) {
+               GLctx.uniform1f(this.pointSizeLocation, GLEmulation.pointSize);
++              // Preserve ordinary point rendering for other SDK consumers
++              // that do not install touchHLE's parameter-state shim.
++              var pointParams = GLEmulation.pointParameters || {
++                0x8126: 0, 0x8127: 1e9, 0x8129: [1, 0, 0]
++              };
++              GLctx.uniform2f(this.pointSizeRangeLocation, pointParams[0x8126], pointParams[0x8127]);
++              GLctx.uniform3fv(this.pointAttenuationLocation, pointParams[0x8129]);
+             }
+           }
+         };

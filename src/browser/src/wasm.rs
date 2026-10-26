@@ -2,11 +2,17 @@
 //! Private worker ABI. Pointer/length pairs must come from these allocators.
 
 #[no_mangle]
+pub extern "C" fn memory_check() -> u32 {
+    u32::from(crate::memory::check().is_ok())
+}
+
+#[no_mangle]
 pub extern "C" fn input_alloc(len: usize) -> *mut u8 {
     if len > super::MAX_IPA_BYTES {
         return std::ptr::null_mut();
     }
-    Box::into_raw(vec![0; len].into_boxed_slice()).cast()
+    // Keep the element type explicit: inspect frees this as a byte slice.
+    Box::into_raw(vec![0u8; len].into_boxed_slice()).cast()
 }
 
 /// Consumes an input allocation and returns an owned JSON byte-vector handle.
