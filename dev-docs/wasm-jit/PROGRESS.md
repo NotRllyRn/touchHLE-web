@@ -457,3 +457,26 @@ Menu152 s, level158 s (unchanged), median first-minute FPS3.205 (50 samples).
 Retain~2.9x targeted speedup/smaller code without claiming whole-game improvement.
 Next use full startup CPU sample stacks to attribute time beyond helper counts.
 M4/M5 and goal remain active; hardware GPU/mobile coverage still missing.
+
+
+Full30 s startup profile confirms CPU/dispatch/state-sync cost. Candidate skips
+redundant CPSR writes between HLE calls, preserving explicit writes, context
+swaps and banking. Shared CPU regression build in progress; benchmarks/game
+required before retention. No target completion or new game-speed claim.
+
+
+CPSR write elision passes actual Node/Chromium CPU/IT/context/cache/fibers.
+Alternating runtime benchmark50k service transitions97.273/118.947/108.556 ms,
+~9–18% gain with variability; unrelated workloads show no consistent regression.
+Full runtime rebuilding; graphics/game measurements required before commit.
+
+
+CPSR dirty full runtime and all nine graphics fixtures pass twice. Clean game
+measurement in progress with automated tutorial input; outcome/retention pending.
+
+
+CPSR dirty clean game passes both lessons, zoom and real touch placement.
+Menu142 s, level158 s unchanged, first-minute FPS median3.27 (50 samples).
+Retain measured9–18% service-call improvement with no material game-speed claim.
+Next inspect bounded direct SVC instruction reads, identified in startup stacks.
+Goal and M4/M5 remain open.

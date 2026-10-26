@@ -2971,3 +2971,51 @@ Under10 s/30 FPS targets remain open. Next capture full startup CPU sample
 stacks with helper names after this change; helper call counts alone do not
 measure time or justify further specialization. Keep instrumented and acceptance
 runs separate. Hardware-GPU/mobile and other-browser validation remain absent.
+
+
+Post-06555f47 full startup CPU profile:27,081 samples over30 s in an otherwise
+idle diagnostic run. Top self samples: cpu_exec3106, lookup2083, TCI dispatcher
+1512, Environment::run_call1440, hottest generated block1425. Interrupt2365
+inclusive, uc_reg_write1238, reg_write1129; qsort1914 inclusive includes guest
+comparators. This supports reducing redundant CPU state synchronization, not
+claiming helper-count reductions alone speed up the game. Raw profile stays local
+at target/jit-startup-full-profile.json; game/profile logs share that prefix.
+Diagnostic run completed150 s normally.
+
+Candidate: browser adapter tracks whether HLE explicitly changed CPSR or swapped
+context. Only dirty CPSR is written on entry, retaining the register snapshot/
+restore around actual bank changes. Every execution still reads CPSR back. New
+engines and swaps mark dirty; repeated identical set calls cannot clear pending
+dirty state. Existing ARM/Thumb/IT, flags, mode-bank and context regressions gate
+retention. Shared CPU rebuilding; isolated service-call benchmark/game pending.
+
+
+CPSR dirty candidate passes interpreter/JIT Node and Chromium CPU/context/IT/
+cache/fibers, plus formatting/diff checks. Logs target/jit-cpsr-dirty-
+{build,node,browser}.log. Isolated new/old/new runtime comparison (five trials
+each):50k service transitions97.273/118.947/108.556 ms (~9–18% faster).
+Linked-blocks107.127/111.406/108.002; memory47.568/47.733/48.264; finite-add
+chain148.445/140.320/131.630; negate38.364/38.322/37.683. Variation limits the
+exact gain claim; no consistent unrelated regression. New/old adapters use the
+same compiler, flags and library. Logs target/jit-cpsr-dirty-{benchmark,old-
+benchmark,comparison}.log. Benchmark artifacts restored to new candidate.
+Full runtime rebuild underway; graphics and clean game still pending.
+
+
+CPSR dirty runtime rebuild and nine forced-JIT graphics fixtures pass twice
+(target/jit-cpsr-dirty-<fixture>.log). Clean TinkerBox run started; no competing
+builds/benchmarks until first-minute FPS interval ends. Local tutorial driver
+now automates tray opening and the same real touch drag, then matches Lesson2
+SUCCESS; manually inspect resulting screenshots before accepting it.
+
+
+CPSR dirty clean game: menu142 s; Training207 to Play365 =158 s, unchanged.
+First60 s after Play:50 logged FPS samples, median3.27, range1.89–3.58 versus
+3.205 previous median. Lesson1 SUCCESS432 s; Lesson2 driver match572 s and
+manual visual verification592 s. Zoom and real touch placement verified.
+Logs target/jit-cpsr-dirty-{game,driver}.log, local screenshots under
+target/browser-jit-cpsr-dirty. Inspector exit1 follows deliberate Stop; driver0.
+Retain bounded CPSR write elision and measured service-call benefit, without
+claiming material whole-game speedup. Under10 s/30 FPS and hardware/mobile
+acceptance remain unmet. Next measured target is interrupt instruction fetching
+(2365 inclusive startup samples), keeping general memory-read fallback.

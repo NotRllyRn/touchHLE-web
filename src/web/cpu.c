@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 typedef struct { uint32_t regs[16], extregs[64], cpsr, fpscr; } Context;
-typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; int stepping; int vectors_loaded; uint32_t *regs; } Cpu;
+typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; int stepping; int vectors_loaded; int cpsr_dirty; uint32_t *regs; } Cpu;
 extern void touchHLE_web_map_memory(void *mem, Cpu *cpu);
 extern size_t touchHLE_uc_executed(uc_engine *uc);
 extern void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining);
@@ -48,6 +48,7 @@ Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_MEM_INVALID, invalid_memory, cpu, 1, 0) == UC_ERR_OK);
   cpu->regs = touchHLE_uc_arm_regs(cpu->uc);
   cpu->context.cpsr = 0x10;
+  cpu->cpsr_dirty = 1;
   return cpu;
 }
 void touchHLE_web_map(Cpu *cpu, uint32_t base, size_t len, void *pointer) {
@@ -60,7 +61,10 @@ void touchHLE_DynarmicWrapper_delete(Cpu *cpu) { uc_close(cpu->uc); free(cpu); }
 const uint32_t *touchHLE_DynarmicWrapper_regs_const(const Cpu *cpu) { return cpu->regs; }
 uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *cpu) { return cpu->regs; }
 uint32_t touchHLE_DynarmicWrapper_cpsr(const Cpu *cpu) { return cpu->context.cpsr; }
-void touchHLE_DynarmicWrapper_set_cpsr(Cpu *cpu, uint32_t value) { cpu->context.cpsr = value; }
+void touchHLE_DynarmicWrapper_set_cpsr(Cpu *cpu, uint32_t value) {
+  cpu->cpsr_dirty |= cpu->context.cpsr != value;
+  cpu->context.cpsr = value;
+}
 void touchHLE_DynarmicWrapper_swap_context(Cpu *cpu, Context *context) {
   // HLE can access integer registers directly, but VFP state only crosses
   // this context boundary. Keep it in Unicorn between ordinary HLE calls.
@@ -71,6 +75,7 @@ void touchHLE_DynarmicWrapper_swap_context(Cpu *cpu, Context *context) {
   }
   memcpy(cpu->context.regs, cpu->regs, sizeof(cpu->context.regs));
   Context temporary = cpu->context; cpu->context = *context; *context = temporary;
+  cpu->cpsr_dirty = 1;
   memcpy(cpu->regs, cpu->context.regs, sizeof(cpu->context.regs));
 }
 void touchHLE_DynarmicWrapper_invalidate_cache_range(Cpu *cpu, uint32_t start, uint32_t size) {
@@ -81,9 +86,12 @@ int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *cpu, void *mem, uint64_t *tick
   Context *c = &cpu->context;
   // CPSR mode changes bank r8-r14. Preserve the caller's supplied registers,
   // matching the original adapter's CPSR-then-registers write order.
-  memcpy(c->regs, cpu->regs, sizeof(c->regs));
-  assert(uc_reg_write(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
-  memcpy(cpu->regs, c->regs, sizeof(c->regs));
+  if (cpu->cpsr_dirty) {
+    memcpy(c->regs, cpu->regs, sizeof(c->regs));
+    assert(uc_reg_write(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
+    memcpy(cpu->regs, c->regs, sizeof(c->regs));
+    cpu->cpsr_dirty = 0;
+  }
   if (!cpu->vectors_loaded) {
     for (int i = 0; i < 32; ++i) assert(uc_reg_write(cpu->uc, UC_ARM_REG_D0+i, &c->extregs[i*2]) == UC_ERR_OK);
     assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);

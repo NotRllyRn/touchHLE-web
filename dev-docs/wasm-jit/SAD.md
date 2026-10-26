@@ -154,3 +154,13 @@ the existing arithmetic layout. Their direct calls become integer sign-bit XOR
 or AND, preserving all other bits and FPSCR without reading status. Dynamic and
 unknown helper calls retain the existing bridge. This avoids floating-point
 canonicalization of signaling/payload NaNs and does not require an ARM decoder.
+
+
+## CPSR synchronization
+
+The browser adapter reads CPSR after every execution. That shadow is authoritative
+until an explicit HLE setter or context swap. Mark new engines and swapped
+contexts dirty; mark setters dirty when they change the shadow, preserving an
+already pending dirty write. On run entry, write CPSR only when dirty, keeping
+the existing integer-register snapshot/restore around that write for banking.
+Native CPU behavior and public adapter ABI remain unchanged.

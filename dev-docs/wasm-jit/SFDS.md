@@ -236,3 +236,14 @@ Test raw signed zero, subnormal, infinity and signaling/quiet payload bits plus
 seeded words; check1280 original ARM edge/mode combinations against interpreter
 and JIT. Benchmark32-operation chains with exact payload/flag assertions and
 compare the same runtime with the previous compiler before fresh game testing.
+
+
+## CPSR write elision
+
+Initialize cpsr_dirty to1. set_cpsr ORs in whether the requested value differs
+from the shadow; swap_context always sets dirty. run_or_step writes CPSR and
+preserves caller-supplied banked registers only when dirty, then clears dirty.
+Every execution still reads CPSR back, including flags, Thumb and IT state.
+Existing mode-bank, ARM/Thumb/IT, context, stepping and nested-fiber regressions
+exercise this boundary. Measure alternating new/old/new service-call throughput
+and full-game loading before retention. No attempt to elide execution-end reads.
