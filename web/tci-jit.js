@@ -129,6 +129,10 @@
       const restore = (indices = Array.from({ length: 16 }, (_, i) => i)) => {
         for (const i of indices) { get(1); emit(0x28, 2, ...uleb(i * 4)); set(i + 4); }
       };
+      const helper = (pc, inputs, outputs) => {
+        save(inputs); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
+        restore(outputs);
+      };
       restore();
       for (const _ of labels) emit(0x02, 0x40);
       for (const { pc, size, name, target } of ops) {
@@ -200,6 +204,25 @@
           const address = (pc + 5) & ~3;
           save(); constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a, 0x0f);
           cursor = pc + size;
+        } else if (name === 'qemu_ld_i32' && this.dispatch?.readLayout) {
+          const dst = byte(), address = byte(), oi = word(), memop = oi >>> 4;
+          const alignment = (memop >>> 4) & 7;
+          // Pinned TCGMemOpIdx: low 4 bits are the MMU index; MO_LEUL=2.
+          // Alignment 7 means natural alignment (or unaligned on strict hosts).
+          if ((memop & 15) === 2 && (alignment <= 2 || alignment === 7)) {
+            const [engine, base, size, pointer] = this.dispatch.readLayout;
+            get(0); emit(0x28, 2, ...uleb(engine));
+            reg(address); constant(31); emit(0x76); constant(2); emit(0x74, 0x6a); set(21);
+            reg(address); get(21); emit(0x28, 2, ...uleb(base), 0x6b); set(22);
+            reg(address); constant(3); emit(0x71, 0x45);
+            get(21); emit(0x28, 2, ...uleb(size)); constant(4); emit(0x4f, 0x71);
+            get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(4); emit(0x6b, 0x4d, 0x71);
+            emit(0x04, 0x7f); // if (aligned && size >= 4 && offset <= size - 4) -> i32
+            get(21); emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a, 0x28, 0, 0);
+            emit(0x05);
+            helper(pc, [address], [dst]); reg(dst);
+            emit(0x0b); put(dst);
+          } else helper(pc, [address], [dst]);
         } else if (name === 'mb') {
           // Worker memory is unshared; TCI's fence has no additional effect.
         } else {
@@ -215,14 +238,13 @@
           else if (name === 'qemu_ld_i64') { outputs = [byte(), byte()]; inputs = [byte()]; }
           else if (name === 'qemu_st_i32') { inputs = [byte(), byte()]; outputs = []; }
           else if (name === 'qemu_st_i64') { inputs = [byte(), byte(), byte()]; outputs = []; }
-          save(inputs); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
-          restore(outputs); cursor = pc + size;
+          helper(pc, inputs, outputs); cursor = pc + size;
         }
         if (cursor !== pc + size) throw new Error(`TCI operand mismatch: ${name}`);
       }
       if (labels.length) throw new Error('Unresolved TCI labels');
       emit(0x00, 0x0b); // Falling off a translated block is an internal error.
-      const body = [2, 16, 0x7f, 1, 0x7e, ...out];
+      const body = [3, 16, 0x7f, 1, 0x7e, 2, 0x7f, ...out];
       return new Uint8Array([
         0, 97, 115, 109, 1, 0, 0, 0,
         ...section(1, [2, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,

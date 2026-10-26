@@ -6,38 +6,42 @@
      unsigned int alloc_hint;
 +#ifdef __EMSCRIPTEN__
 +    // Opt-in immutable RWX host mapping owned by the touchHLE adapter only.
-+    uint32_t touchhle_read_base, touchhle_read_size;
-+    uint8_t *touchhle_read_pointer;
++    uint32_t touchhle_read_base[2], touchhle_read_size[2];
++    uint8_t *touchhle_read_pointer[2];
 +#endif
      /* qemu/exec-vary.c */
      TargetPageBits *init_target_page;
      int target_bits; // User defined page bits by uc_ctl
 --- a/uc.c
 +++ b/uc.c
-@@ -112,6 +112,20 @@
+@@ -110,6 +110,24 @@
+         free(h);
+     }
  }
- 
++
 +#ifdef __EMSCRIPTEN__
 +// Caller guarantees immutable mapping/permissions, identity ARM addresses,
 +// and no valid-memory read hooks for this engine's entire lifetime.
 +UNICORN_EXPORT void touchHLE_uc_read_region(uc_engine *uc, uint32_t base,
 +                                           uint32_t size, void *pointer)
 +{
-+    if (size > uc->touchhle_read_size) {
-+        uc->touchhle_read_base = base;
-+        uc->touchhle_read_size = size;
-+        uc->touchhle_read_pointer = pointer;
++    // Largest fixed region in each address-space half: low RAM and high stack.
++    // A region crossing the half boundary retains normal MMU handling.
++    unsigned slot = base >> 31;
++    if (size && (((uint64_t)base + size - 1) >> 31) == slot &&
++        size > uc->touchhle_read_size[slot]) {
++        uc->touchhle_read_base[slot] = base;
++        uc->touchhle_read_size[slot] = size;
++        uc->touchhle_read_pointer[slot] = pointer;
 +    }
 +}
 +#endif
-+
+ 
  UNICORN_EXPORT
  unsigned int uc_version(unsigned int *major, unsigned int *minor)
- {
-     if (major != NULL && minor != NULL) {
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -1176,6 +1176,19 @@
+@@ -1177,6 +1177,19 @@
                  tmp32 = (int16_t)qemu_ld_leuw;
                  break;
              case MO_LEUL:
@@ -46,11 +50,11 @@
 +                // immutable adapter mapping bypass the soft MMU. Stores keep
 +                // Unicorn's full invalidation/dirty-page path.
 +                if (!(taddr & 3) && get_alignment_bits(get_memop(oi)) <= 2 &&
-+                    env->uc->touchhle_read_size >= 4 &&
-+                    taddr >= env->uc->touchhle_read_base &&
-+                    taddr - env->uc->touchhle_read_base <= env->uc->touchhle_read_size - 4) {
-+                    tmp32 = ldl_le_p(env->uc->touchhle_read_pointer +
-+                                    (taddr - env->uc->touchhle_read_base));
++                    env->uc->touchhle_read_size[taddr >> 31] >= 4 &&
++                    taddr >= env->uc->touchhle_read_base[taddr >> 31] &&
++                    taddr - env->uc->touchhle_read_base[taddr >> 31] <= env->uc->touchhle_read_size[taddr >> 31] - 4) {
++                    tmp32 = ldl_le_p(env->uc->touchhle_read_pointer[taddr >> 31] +
++                                    (taddr - env->uc->touchhle_read_base[taddr >> 31]));
 +                    break;
 +                }
 +#endif

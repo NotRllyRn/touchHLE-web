@@ -80,3 +80,11 @@ Normal budget and pending-exit checks emit TCG operations. Exhaustion uses the
 original CPU stop/restore path; exact debugger stepping retains the instruction
 hook and flushes translations when modes change. Budget counts guest instructions,
 including one tick for a wide Thumb instruction; one block can overshoot.
+
+The browser adapter opts into one immutable identity-mapped RWX RAM region in
+each half of the guest address space (ordinary RAM and high stack). General
+Unicorn engines do not opt in. C exports metadata structure offsets to the JIT;
+compiled aligned little-endian32-bit loads check size/bounds at runtime, preserving
+memory growth and per-engine identity. Any unsupported access uses the original
+helper, and all stores retain the full invalidation path. New mapping/protection/
+valid-memory-hook APIs would require disabling or revisiting this contract.

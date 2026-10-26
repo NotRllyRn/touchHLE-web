@@ -1400,3 +1400,53 @@ completed. New 3,600 s inspector run enables DIAGNOSTICS=1 and
 INSPECTION_OPTIONS='com.autodesk.tinkerbox: --print-fps'; the guest loader confirms
 that standard option was applied. Files stay local under target/browser-jit-fast-read/.
 This is a diagnostic/gameplay run, not a release timing trial.
+
+Fast-read startup profile (`target/jit-fast-read-profile/summary.json`, same
+15 s sample protocol) shifts load_helper from 1,229 to443 self samples; TCI
+single-op dispatch is now the largest CPU category. Guest context snapshots
+identify FMOD Vorbis decode, zlib crc32/inflate_fast, and Ogre::Image::scale.
+Symbol lookup/disassembly uses the locally owned Mach-O symbol table; no game
+code/assets are published. Public Ogre1.7.0 source consulted:
+https://github.com/OGRECave/ogre/tree/v1-7-0/RenderSystems/GLES/src
+It distinguishes GPU mipmaps from CPU image resizing. Its NPOT capability probe
+is commented out, and this game's binary contains no matching NPOT extension
+strings; advertising a new GL extension would not establish a safe speedup.
+An initial v1-7-4 source URL returned404; git ls-remote identified v1-7-0.
+
+Next experiment emits the existing bounded 32-bit read directly in Wasm, with
+raw-helper fallback. C provides structure offsets instead of hardcoded ABI
+layout. The original single-region version passes eight JS test groups, actual
+Node/Chromium CPU/fiber checks and HLE mipmap twice
+(`target/jit-inline-read-{unit,node,browser,mipmap}.log`). The expanded version
+covers low RAM and high stack using one immutable region per address-space half;
+regions spanning the boundary remain on the MMU path. Tests cover first/last
+words, high-address unsigned bounds, unavailable regions, unaligned/other formats,
+stricter alignment, multiple engines and memory growth. Eight JS groups and actual
+Node CPU checks pass (`target/jit-inline-stack-{unit,node}.log`). Browser/runtime
+checks and isolated performance measurement are pending. Reverse/reapply of all
+patches in declared order passes in a temporary source copy; git apply reports
+an existing extra blank line at the end of the budget patch (not a build failure).
+
+Inline low/high reads: Chromium CPU/fiber checks and forced-JIT actual HLE
+mipmap fixture pass twice (`target/jit-inline-stack-{browser,mipmap}.log`), full
+runtime build completes (`target/jit-inline-stack-runtime-build.log`). Corrected
+unsigned high-address/memory-growth tests pass in Node and JS.
+
+To avoid competing active browser CPU work while preserving the long diagnostic
+game, its owned Chromium descendant processes were suspended with SIGSTOP and
+resumed in finally with SIGCONT; benchmark subprocesses had a25 s timeout. The
+inspector itself stayed live. First pause19.545 s (includes benchmark compilation),
+second7.039 s. This makes the game run unsuitable for startup/simulation timing;
+no acceptance timing is claimed. CPU benchmark has no concurrent builds or active
+game execution, but retains the suspended browser's memory footprint.
+
+Five-trial Asyncify medians (`target/jit-inline-stack-benchmark.log`): interpreter/
+JIT ms tiny65.172/10.191, medium90.643/9.533, long304.210/14.175,
+memory138.238/75.007, SVC226.271/197.865. A tighter same-Wasm A/B/A comparison
+removes only readLayout from a copied generated JS initializer, leaving the
+existing C read optimization enabled. Memory medians inline79.113, helper81.952,
+inline75.633 ms; ranges77.805–107.013,81.890–83.377,74.771–76.383. SVC medians
+184.268/174.603/175.756 show run-order variability, not a demonstrated regression
+or improvement. Log `target/jit-inline-stack-comparison.log`; pause logs share
+that prefix. Retain the bounded inline path for its measured modest memory benefit;
+do not extrapolate to game speed. Standard builds remain opt-in JIT.

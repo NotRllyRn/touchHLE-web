@@ -78,3 +78,11 @@ median improves 100.565 to 83.610 ms with fast reads. Source retains full store
 invalidation and all general-Unicorn semantics. Raw-helper game reaches terms
 and main menu at diagnostic driver clicks813/843 s, but no JIT playable level
 has yet been validated. Longer fast-read game run with guest FPS logging underway.
+
+Direct Wasm reads now cover bounded low RAM and high stack. CPU ABI offsets come
+from C; unaligned, strict-alignment, other-format and invalid accesses fall back.
+Eight compiler test groups, actual Node/Chromium CPU/fibers and HLE mipmap twice
+pass. Same-Wasm memory A/B/A medians79.113/81.952/75.633 ms show a modest benefit.
+Long diagnostic game has reached Training selection, but first level is still
+loading. CPU benchmarks temporarily suspended that diagnostic browser; its wall
+clock is explicitly not release timing evidence. Startup/real-time targets unmet.

@@ -17,6 +17,8 @@ extern int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *, void *, uint64_t *);
 extern void touchHLE_web_map(Cpu *, uint32_t, size_t, void *);
 void touchHLE_web_map_memory(void *mem, Cpu *cpu) {
   touchHLE_web_map(cpu, 0x1000, 4096, mem);
+  static uint32_t high_memory[1024] = {[0] = 0x11223344, [1022] = 0x44332211, [1023] = 0x88776655};
+  touchHLE_web_map(cpu, 0xfffff000, 4096, high_memory);
 }
 void adapter_checks(void) {
   uint32_t *code = calloc(1, 4096);
@@ -105,11 +107,11 @@ void adapter_checks(void) {
   code[1022] = 0x44332211; code[1023] = 0x88776655;
   touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
   touchHLE_DynarmicWrapper_set_cpsr(cpu, 0x10);
-  const uint32_t addresses[] = {0x1000, 0x1ffc, 0x1ff9};
-  const uint32_t expected[] = {0xe5910000, 0x88776655, 0x55443322};
+  const uint32_t addresses[] = {0x1000, 0x1ffc, 0x1ff9, 0xfffff000, 0xfffffffc, 0xfffffff9};
+  const uint32_t expected[] = {0xe5910000, 0x88776655, 0x55443322, 0x11223344, 0x88776655, 0x55443322};
   for (unsigned pass = 0; pass < 2; ++pass) {
     if (pass) assert(emscripten_resize_heap(emscripten_get_heap_size() + 64 * 1024 * 1024));
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < sizeof(addresses) / sizeof(addresses[0]); ++i) {
       for (unsigned hot = 0; hot < 64; ++hot) {
         regs[1] = addresses[i]; regs[15] = 0x1000; ticks = 100;
         assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
