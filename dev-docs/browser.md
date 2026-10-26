@@ -2487,3 +2487,13 @@ All clean timing/correctness artifacts remain local; no game data committed.
 Next local-only measurement compares CPU benchmark link optimization O2/O3
 with the same production assertions, stack checks and Asyncify exclusions.
 No production optimization flag changed. Game stopped before benchmarking.
+
+Local O2/O3/O2 five-trial medians (ms): linked-blocks108.219/108.040/106.953,
+SVC118.669/125.531/120.593, code-page memory47.839/48.626/47.234,
+library-memory5.698/5.740/5.364. No competing workload; all assertions pass.
+Wasm sizes1126203/1118757 bytes (~0.7% less). No convincing speed gain: retain
+O2. `target/jit-opt3-{benchmark-build,comparison}.log`. This comparison changes
+both benchmark C source compilation and final linking; full-runtime cc::Build
+already inherits release optimization. It cannot establish an isolated linker
+benefit. No production flags changed; default benchmark artifact restored to O2.
+Next profile current game loading/HLE cost before another speculative CPU change.

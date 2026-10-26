@@ -327,3 +327,7 @@ one screenshot interval; no statistical acceptance. At matched Play+5.3 s,
 ~21% fewer emitted bytes, ~16% less compilation time and3 vs6 evictions.
 Retain68577f3a after regressions/game checks. Next compare O2/O3 CPU linking
 without changing production flags. M4/M5 remain open.
+
+O3 benchmark experiment shows no convincing gain (linked108.2/108.0/107.0 ms,
+SVC118.7/125.5/120.6 O2/O3/O2); retain production O2. Source compilation also
+varies, so no isolated linker claim. Next profile current loading/HLE cost.
