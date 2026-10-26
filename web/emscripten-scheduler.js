@@ -6,6 +6,8 @@ addToLibrary({
   touchhle_web_yield__async: true,
   touchhle_web_yield: () => Asyncify.handleSleep(wakeUp => {
     if (globalThis.process?.versions?.node) return safeSetTimeout(wakeUp, 0);
+    // Ordinary tasks stay responsive to input; scheduler.yield continuations can starve it.
+    if (globalThis.scheduler?.postTask) return scheduler.postTask(() => callUserCallback(wakeUp));
     if (!touchhleYieldTask) {
       const channel = new MessageChannel();
       let pending;

@@ -1695,3 +1695,16 @@ finish (50.9 ms in the tiny fixture; unbounded starvation in sustained execution
 is unacceptable). Failed log `target/jit-scheduler-api-check.log`. Do not ship
 that version. Testing ordinary scheduler.postTask instead, with MessageChannel
 fallback and explicit mid-execution input progress assertions for both paths.
+
+Ordinary scheduler.postTask passes Asyncify state and input-progress assertions
+(`target/jit-scheduler-post-task-check.log`). Preferred2000 yields50.5/36.5/37.2 ms,
+MessageChannel fallback52.7/42.1/39.6 ms; all input pings occur at progress1 of2000
+(preferred0.4–0.7 ms, fallback0.4–1.1 ms). Positive20 ms sleep remains >=20 ms.
+These fixture diagnostics ran near HLE regression work and are not game timing.
+Prefer postTask when available, retain MessageChannel when absent and Node timer
+fallback. Full runtime build/regressions/game retest pending.
+
+postTask full runtime rebuild completed successfully. Nine forced-JIT graphics
+fixtures pass twice, actual audio passes, JS20 pass
+(`target/jit-post-task-{runtime-build,TEST_*,audio,js}.log`). Formatting/diff pass.
+Next is a clean game run combining same-block loops and ordinary browser tasks.

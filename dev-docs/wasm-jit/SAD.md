@@ -68,3 +68,8 @@ with PC synchronized and pending Thumb IT state preserved. Actual exceptional
 exits still use Unicorn restoration/unwinding. The Wasm compiler specializes the
 known post-memory exit-check helper using its C-provided identity and layout:
 ordinary no-op checks stay in Wasm, pending exits retain the original helper.
+
+Same-block linked loops remain inside their generated Wasm function, preserving
+TCI temporaries in locals. Read the mutable target on every backedge; other targets
+return through the existing dispatcher. Every iteration retains budget/exit
+checks and self-modifying-code invalidation. No cross-block trace construction.

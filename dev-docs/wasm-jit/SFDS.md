@@ -100,3 +100,9 @@ Budget-return regressions include Thumb conditional state across page boundaries
 Post-memory exit predicates preserve normalized helper return registers and delay
 slots. Actual valid-memory hooks repeatedly stop before the following instruction,
 then resume after hook removal. Other helper identities use the existing path.
+
+Self-loop regressions verify local loop state, dynamic unlinking and guest writes
+that replace the executing loop's own instruction. Compiled-hit statistics count
+C-to-generated-code dispatches, not internal self-loop iterations. Scheduler tests
+assert input arrives before the repeated-yield workload finishes, for both the
+preferred browser task API and MessageChannel fallback.

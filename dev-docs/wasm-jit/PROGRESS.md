@@ -7,7 +7,7 @@ Updated: 2026-10-26. Thread goal: active.
 - [x] M0: validate and commit the existing uncommitted browser baseline.
 - [x] M1: reproducible CPU baseline, current startup profile, architecture choice.
 - [x] M2: compiled blocks, interpreter fallback and differential tests.
-- [ ] M3: full runtime integration and hot-path coverage.
+- [x] M3: full runtime integration and hot-path coverage.
 - [ ] M4: real-time Training 01/Lesson 2 and startup target measurements.
 - [ ] M5: regression/browser/device results, final documentation and source push.
 
@@ -137,3 +137,14 @@ Full HLE/game checks pending before commit. Detailed failures/probes in browser.
 Self-loop HLE graphics matrix passes twice. Pure scheduler.yield rejected by new
 input-during-execution assertion (ping starved until all2000 yields finished).
 Testing ordinary postTask and MessageChannel fallback before any scheduler commit.
+
+M3 is complete on the validated a03e0005 integration: actual game training through
+Lesson2 SUCCESS, graphics/audio/input and CPU fault/cache/fiber coverage exist.
+M4 performance and M5 final/device validation remain open; subsequent optimizations
+still require their own regressions. Goal remains active.
+
+Ordinary scheduler.postTask passes the new input-progress test for both preferred
+and MessageChannel fallback paths. All six2000-yield trials receive input after
+the first yield; preferred ping0.4–0.7 ms, fallback0.4–1.1 ms. Full rebuild pending.
+postTask full runtime, nine graphics fixtures twice, audio and JS20 pass. Next:
+clean combined self-loop/postTask game timing, then profile remaining cost.
