@@ -2268,7 +2268,7 @@ compiler independently. Retain pending fresh game timing/correctness.
 `target/jit-partial-cache-web-build.log` and graphics logs. Acceptance stays open.
 
 Read-only runtime disassembly identifies a further performance question. The
-current full runtime uses ASSERTIONS=2 and STACK_OVERFLOW_CHECK=2, while the
+current full runtime uses ASSERTIONS=1 and STACK_OVERFLOW_CHECK=2, while the
 standalone CPU benchmark uses default assertions. Asyncify restore prologues
 remain in touchhle_tci_call, touchhle_tci_interpret, cpu_exec_arm, tb_gen_code_arm
 and float32_add_arm. State-global read counts in their disassembled bodies are
@@ -2279,3 +2279,36 @@ These observations do not establish the cost or justify broad exclusions yet.
 Next compare production checking overhead and investigate synchronous CPU helper
 boundaries, retaining real Rust/HLE yielding and strict regression fixtures.
 No assertion/Asyncify setting has been changed by this diagnostic.
+
+Partial-cache clean game reached main-menu screenshot172 s, training input255 s,
+and Play input479 s (screenshot473 s):224 s selection-to-Play, versus220 s in
+the prior page-map run. Ten-second screenshot sampling and driver polling limit
+precision; no material game-loading improvement established. Render logs remain
+approximately3 FPS. No build/test/profile competed before Play. CPU benchmark
+builds started afterward, so subsequent lesson timestamps are correctness only.
+Logs `target/jit-partial-cache-{game,driver}.log`.
+
+Corrected the preceding diagnostic assertion level: production uses ASSERTIONS=1,
+not2. `CPU_CHECKS=1 node web/bench-cpu.mjs` now selects production assertion and
+stack checking levels; combine with CPU_ASYNCIFY=1 for the instrumentation
+comparison. Defaults remain unchanged. Paired benchmark builds/results pending;
+no production flag change. Build-phase timings with the game running are excluded.
+
+Partial-cache game confirms Lesson1 SUCCESS in canvas-573.png and Lesson2
+SUCCESS in canvas-755.png under `target/browser-jit-partial-cache/`. Lesson2
+uses actual touch drag and Play. Runtime deliberately stopped with the UI Stop
+button after verification; inspector exit1 is manual termination, not guest
+failure. Both lessons pass; real-time and startup targets remain unmet.
+Benchmark harness change passes node --check, JS26, cargo fmt --check and
+ git diff --check. Checked and unchecked Asyncify builds execute both interpreter
+and JIT result assertions successfully; timings during these builds are excluded.
+
+Isolated Asyncify unchecked/checked/unchecked five-trial medians (ms), Node22:
+SVC104.678/118.610/104.046; code-page memory49.195/52.569/49.339;
+library-memory5.769/5.893/5.604; data-memory5.631/5.681/5.749;
+float-add-normal23.219/22.730/21.939. Tiny arithmetic5.881/5.285/3.625
+shows warmup variation. No competing game/build/test. All guest assertions pass,
+zero JIT failures. `target/jit-runtime-checks-comparison.log`. Checks contribute
+to some microbenchmarks but do not explain the game gap; retain production flags.
+Next local experiment excludes only synchronous TCI call/step/interpreter bridges
+in addition to the existing dispatcher, retaining checks and all HLE/fiber code.

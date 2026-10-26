@@ -284,3 +284,10 @@ Partial-cache101e15f0 pushed; fresh clean game running. Read-only disassembly
 confirms Asyncify restore/check code in CPU/translation/helpers and stronger
 production assertions than standalone microbenchmarks. Next measure checking/
 instrumentation overhead before changing flags; no exclusions accepted yet.
+
+Partial-cache clean game: menu172 s; training255 to Play479 =224 s, ~3 FPS.
+Both lessons SUCCESS573/755 s. No material loading gain versus220 s previous.
+CPU checking comparison shows SVC104.7/118.6/104.0 ms unchecked/checked/unchecked;
+retain production checks. Corrected diagnostic assertion level to1. Benchmark
+option CPU_CHECKS=1 passes both backend result checks, JS26 and formatting.
+Next measure narrow synchronous TCI bridge exclusions; M4/M5 remain open.
