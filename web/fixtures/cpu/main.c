@@ -9,6 +9,7 @@
 
 extern void run_shared_cpu_checks(void);
 extern void adapter_checks(void);
+extern void cache_checks(void);
 extern void rust_memory_write(uint64_t, uint32_t, int64_t);
 extern void rust_hle_callback(uc_engine *);
 static unsigned traps;
@@ -144,6 +145,7 @@ static void guest_entry(void *unused) {
   abort();
 }
 int main(void) {
+  cache_checks();
   const size_t size = 256 * 1024;
   void *main_async = malloc(size), *guest_async = malloc(size), *stack = malloc(size);
   assert(main_async && guest_async && stack);

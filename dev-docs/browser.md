@@ -1153,3 +1153,64 @@ the worker catch instead of onExit; both paths now report counters. Final
 forced-JIT HLE and MIPMAP fixtures pass twice in Chromium, requiring compiled
 blocks and zero compile failures (`target/jit-runtime-hle-final.log`,
 `target/jit-runtime-mipmap-final.log`). Do not test served dist during a build.
+
+Startup sampling of the first integrated JIT (`web/profile-runtime.mjs`, 10 s
+initial delay + 15 s Profiler-only sample, local owned IPA, Chromium 141) passes
+without page errors. At ~22 s it reports 287 compiled blocks, 863,027 cache hits,
+zero compilation failures and 616 ms cumulative compilation. Sample self-time:
+TCI interpreter/helper execution 21.0%, translation generation 6.3%, store helper
+5.4%, address translation 5.2%, load helper 4.5%, memory mapping 4.4%, with
+additional register-transfer overhead. `target/jit-profile/{summary.json,
+worker.cpuprofile,logs.json,page.png}` retains evidence. This sampled run is not
+a startup acceptance timing, and had not reached the main menu.
+
+Follow-up experiments:
+- Selective register transfers for existing memory helpers and bounded compiler
+  retention (16 MiB emitted code, 4,096 modules, 65,536 metadata entries) added.
+  These bounds cover retained emitted code, not total browser machine-code RAM.
+- Direct Wasm-table helper calls passed smoke tests but hung the medium-loop
+  benchmark after earlier CPU instances. Terminated those runs and removed the
+  optimization. Failed logs: `target/jit-{eager,lazy}-benchmark.log`, diagnostic
+  `target/jit-runaway.log`. Isolated single-instance loops passed, so they were
+  insufficient coverage. Benchmarks now have a slice limit to detect recurrence.
+- Keep VFP registers/FPSCR in Unicorn between ordinary HLE calls; materialize
+  only at context swaps. The production-adapter fixture now checks different
+  VFP values, repeated calls, swaps and FPSCR restoration. Node interpreter/JIT
+  suites pass (`target/jit-lazy-node.log`), 259 compiled blocks, no failures.
+- With direct calls disabled, all five trials of each benchmark finish
+  (`target/jit-without-direct.log`), including 50,000 repeated SVCs. Eager VFP
+  transfer interpreter median ~283 ms vs lazy ~150 ms in the earlier same-helper
+  comparison; final controlled results and browser regressions are pending.
+
+Refined JIT game observation (180-second bounded run, not acceptance):
+`PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+TEST_URL='http://127.0.0.1:8765/?cpu=jit'
+INSPECTION_DIR=target/browser-jit-refined/ RUN_SECONDS=180
+node web/inspect-ipa.mjs '/root/local-ipas/TinkerBox HD 1.4.1.ipa'`.
+The final screenshot still shows the Autodesk loading splash. At 183 s:
+6,573 compiled blocks, 27,486,486 compiled hits, zero compile failures,
+6,051 ms compilation, 337,813 registered translations, 9 cache resets (4 from
+metadata limits). No menu or gameplay performance pass. Logs/screenshots remain
+local. The image-guarded menu driver did not match a stage. This proves the
+current acceleration is insufficient for the startup target.
+
+New original cache fixture checks guest-store invalidation of compiled code,
+write protection, unmap/remap and cross-page reads/faults; interpreter and forced
+JIT pass in Node (`target/jit-cache-node.log`). Full refined MIPMAP passes twice
+in Chromium (`target/jit-refined-mipmap-final.log`). An earlier refined-MIPMAP
+attempt again ran during linking and failed; retained in
+`target/jit-refined-mipmap.log`. The final run waited for confirmed build exit.
+Integer register transfers now use Unicorn's existing batch API; isolated
+old/lazy/batch adapter benchmarks and expanded browser checks are in progress.
+
+Controlled register-transfer comparison: same compiler/helper path, Node
+v22.22.3, five trials per backend/workload. `CPU_ADAPTER` selects an ignored copy
+of the prior adapter when running `node web/bench-cpu.mjs`; no game assets used.
+For 50,000 SVC exits, interpreter/JIT median milliseconds were eager VFP
+279.269/287.191, lazy VFP 152.219/161.071, and lazy VFP + batched integer registers
+142.786/145.545. Retain both small adapter changes (~1.97x faster JIT host-call
+benchmark). Arithmetic-loop timings stayed similar: final JIT long-loop median
+50.739 ms versus interpreter 294.841 ms. Tiny loops remain slower in JIT mode.
+Logs: `target/jit-{eager,lazy,batch}-final.log`. The first expanded batch-suite
+invocation had an incorrect relative require path in an ignored local runner
+(`target/jit-batch-node.log`); corrected rerun is `target/jit-batch-node-final.log`.

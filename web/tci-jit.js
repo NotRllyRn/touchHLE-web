@@ -35,18 +35,24 @@
       this.threshold = threshold;
       this.names = [];
       this.blocks = new Map();
-      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0 };
+      this.liveBytes = 0;
+      this.liveModules = 0;
+      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, registered: 0, liveBytes: 0 };
     }
     reset() {
       for (const block of this.blocks.values()) if (block.fn) this.removeFunction(block.fn);
       this.blocks.clear();
+      this.liveBytes = this.stats.liveBytes = 0;
+      this.liveModules = 0;
       this.stats.resets++;
     }
     register(ptr, size) {
       const old = this.blocks.get(ptr);
-      if (old?.fn) this.removeFunction(old.fn);
+      if (old?.fn) { this.removeFunction(old.fn); this.liveBytes -= old.bytes; this.liveModules--; }
+      this.stats.liveBytes = this.liveBytes;
       // Bound metadata/module retention, including permanently cold blocks.
-      if (this.blocks.size >= 16384) this.reset();
+      if (this.blocks.size >= 65536) { this.reset(); this.stats.metadataResets++; }
+      this.stats.registered++;
       this.blocks.set(ptr, { size, count: 0, fn: 0, failed: false });
     }
     lookup(ptr) {
@@ -57,9 +63,23 @@
       const start = performance.now();
       try {
         const bytes = this.compile(ptr, block.size);
+        if (bytes.length > 262144) throw new Error('Compiled block exceeds 256 KiB');
+        if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 4096) {
+          // Retain translation identities so an evicted hot block can recompile.
+          for (const entry of this.blocks.values()) {
+            if (entry.fn) this.removeFunction(entry.fn);
+            entry.fn = 0; entry.count = 0;
+          }
+          this.liveBytes = 0;
+          this.liveModules = 0;
+        }
         const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes),
           { e: { m: this.memory, s: this.step } });
         block.fn = this.addFunction(instance.exports.run, 'iiiii');
+        block.bytes = bytes.length;
+        this.liveModules++;
+        this.liveBytes += bytes.length;
+        this.stats.liveBytes = this.liveBytes;
         this.stats.compiled++;
         this.stats.bytes += bytes.length;
       } catch (error) {
@@ -179,8 +199,13 @@
         } else {
           // Preserve QEMU memory/exception/VFP semantics via the same interpreter
           // operation. Helpers cannot yield; exceptions propagate through Wasm.
-          save(); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
-          restore(); cursor = pc + size;
+          let inputs, outputs;
+          if (name === 'qemu_ld_i32') { const dst = byte(); inputs = [byte()]; outputs = [dst]; }
+          else if (name === 'qemu_ld_i64') { outputs = [byte(), byte()]; inputs = [byte()]; }
+          else if (name === 'qemu_st_i32') { inputs = [byte(), byte()]; outputs = []; }
+          else if (name === 'qemu_st_i64') { inputs = [byte(), byte(), byte()]; outputs = []; }
+          save(inputs); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
+          restore(outputs); cursor = pc + size;
         }
         if (cursor !== pc + size) throw new Error(`TCI operand mismatch: ${name}`);
       }

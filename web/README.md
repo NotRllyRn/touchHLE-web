@@ -205,3 +205,27 @@ in `dev-docs/browser.md`; screenshots and control files stay in ignored target.
 With a diagnostic runtime, `DIAGNOSTICS=1` logs draw counts and candidate saved
 main-thread registers every 30 seconds. `INSPECTION_DIR` can select a separate
 output directory (include its trailing slash) for each comparison run.
+
+## Experimental CPU acceleration
+
+The source-built runtime includes an opt-in TCI-to-WebAssembly compiler. Open
+`?cpu=jit` to compile hot blocks locally in the worker. `&jitThreshold=1` forces
+compilation for regression tests. The default remains the interpreter. This
+prototype has not met real-time TinkerBox or sub-10-second startup targets.
+Requirements, architecture, tests and progress: `../dev-docs/wasm-jit/`.
+
+After rebuilding the patched Unicorn and shared CPU fixture:
+
+```sh
+node --test web/test/tci-jit.test.mjs
+TEST_SHARED_CPU=1 TEST_JIT=1 TEST_FIBERS=1 \
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-browser.mjs
+node web/bench-cpu.mjs
+```
+
+The last command needs the activated Emscripten SDK. It verifies and times
+original ARM arithmetic loops and repeated host-call exits, with five trials
+per backend. These synthetic results do not establish game FPS. For startup
+sampling use `TEST_IPA=/absolute/path/to/owned.ipa node web/profile-runtime.mjs`;
+its sampled run is deliberately separate from acceptance timing. Wait for the
+runtime build to finish before testing or serving its JS/Wasm pair.

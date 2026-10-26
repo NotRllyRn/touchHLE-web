@@ -33,3 +33,18 @@ and HLE/MIPMAP runtime checks twice in Chromium. Same-build synthetic medians
 show 1.64x/5.68x for medium/long arithmetic blocks but 6.8% regression on tiny
 blocks. Full-game profile is running. M2 remains open for broader differential
 coverage/cache bounds and M3 for game-driven integration. Goal is not complete.
+
+Profile-guided iteration: first game startup sample executes compiled code but
+still spends substantial time in helpers/memory and state transfers. Direct
+helper-table calls were rejected after a multi-instance benchmark hang. Retain
+existing helper path, selective memory operand transfer, bounded cache and lazy
+VFP context materialization. Expanded adapter tests pass in Node. Rebuilt full
+runtime/browser regressions and new game startup measurement are next. Exact
+commands, failed attempts and measurements are recorded in ../browser.md.
+
+Three-minute refined JIT game run remains on loading splash, with 27.5 million
+compiled hits and zero compiler failures. Startup target is not met. Counters
+show ~338k translations and four metadata-limit resets during initialization;
+compiler retention/dispatch and guest-memory helpers need further work. New
+self-modifying-code/protection/unmap/cross-page tests pass in Node. Benchmarking
+batched register transfers separately from lazy VFP transfers before retaining.

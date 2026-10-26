@@ -27,7 +27,9 @@ int main(void) {
       regs[1] = 100000; regs[15] = 0x1000;
       double start = emscripten_get_now();
       int result;
+      unsigned slices = 0;
       do {
+        assert(++slices <= 1000);
         uint64_t ticks = 100000000;
         result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
       } while (result == -1);
@@ -37,6 +39,23 @@ int main(void) {
              length, trial, 100000 * (length + 2) + 1, ms);
       touchHLE_DynarmicWrapper_delete(cpu);
     }
+    free(code);
+  }
+  for (unsigned trial = 0; trial < 5; ++trial) {
+    uint32_t *code = calloc(1, 4096);
+    code[0] = 0xe2800001; code[1] = 0xef000042; code[2] = 0xeafffffc;
+    Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
+    uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
+    regs[15] = 0x1000;
+    double start = emscripten_get_now();
+    for (unsigned i = 0; i < 50000; ++i) {
+      uint64_t ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    }
+    double ms = emscripten_get_now() - start;
+    assert(regs[0] == 50000);
+    printf("BENCH {\"kind\":\"svc\",\"trial\":%u,\"calls\":50000,\"ms\":%.3f}\n", trial, ms);
+    touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
   return 0;

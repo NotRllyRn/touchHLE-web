@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 typedef struct Cpu Cpu;
+typedef struct { uint32_t regs[16], extregs[64], cpsr, fpscr; } Context;
+extern void touchHLE_DynarmicWrapper_swap_context(Cpu *, Context *);
 extern Cpu *touchHLE_DynarmicWrapper_new(void *, size_t);
 extern void touchHLE_DynarmicWrapper_delete(Cpu *);
 extern uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *);
@@ -72,6 +74,31 @@ void adapter_checks(void) {
   regs[0] = 0; regs[15] = 0x1000; ticks = 1;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -1);
   assert(ticks == 0 && regs[0] > 0 && regs[0] <= 512);
+  // VFP remains live across HLE calls and materializes on a context swap.
+  const uint32_t vfp[] = {0xeeb70a00, 0xeef00a00, 0xee301a20, 0xee110a10, 0xef000042};
+  memcpy(code, vfp, sizeof(vfp));
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x40400000);
+  Context other = { .cpsr = 0x10, .fpscr = 0x01000000 };
+  other.regs[15] = 0x1000; other.extregs[0] = 0x40a00000;
+  touchHLE_DynarmicWrapper_swap_context(cpu, &other);
+  assert(other.extregs[0] == 0x3f800000 && other.extregs[2] == 0x40400000);
+  code[0] = 0xee100a10; code[1] = 0xef000042; // vmov r0,s0; svc
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x40a00000);
+  // A second call must keep the active VFP state without reloading stale data.
+  regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x40a00000);
+  touchHLE_DynarmicWrapper_swap_context(cpu, &other);
+  assert(other.extregs[0] == 0x40a00000 && other.fpscr == 0x01000000);
+  regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x3f800000);
   touchHLE_DynarmicWrapper_delete(cpu);
   free(code);
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 typedef struct { uint32_t regs[16], extregs[64], cpsr, fpscr; } Context;
-typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; size_t budget; int stepping; } Cpu;
+typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; size_t budget; int stepping; int vectors_loaded; void *reg_values[16]; } Cpu;
 extern void touchHLE_web_map_memory(void *mem, Cpu *cpu);
 extern size_t touchHLE_uc_executed(uc_engine *uc);
 static const int registers[] = {UC_ARM_REG_R0,UC_ARM_REG_R1,UC_ARM_REG_R2,UC_ARM_REG_R3,
@@ -63,6 +63,7 @@ Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_INTR, interrupt, cpu, 1, 0) == UC_ERR_OK);
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_BLOCK, block, cpu, 1, 0) == UC_ERR_OK);
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_MEM_INVALID, invalid_memory, cpu, 1, 0) == UC_ERR_OK);
+  for (int i = 0; i < 16; ++i) cpu->reg_values[i] = &cpu->context.regs[i];
   cpu->context.cpsr = 0x10;
   return cpu;
 }
@@ -75,6 +76,13 @@ uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *cpu) { return cpu->context.regs
 uint32_t touchHLE_DynarmicWrapper_cpsr(const Cpu *cpu) { return cpu->context.cpsr; }
 void touchHLE_DynarmicWrapper_set_cpsr(Cpu *cpu, uint32_t value) { cpu->context.cpsr = value; }
 void touchHLE_DynarmicWrapper_swap_context(Cpu *cpu, Context *context) {
+  // HLE can access integer registers directly, but VFP state only crosses
+  // this context boundary. Keep it in Unicorn between ordinary HLE calls.
+  if (cpu->vectors_loaded) {
+    for (int i = 0; i < 32; ++i) assert(uc_reg_read(cpu->uc, UC_ARM_REG_D0+i, &cpu->context.extregs[i*2]) == UC_ERR_OK);
+    assert(uc_reg_read(cpu->uc, UC_ARM_REG_FPSCR, &cpu->context.fpscr) == UC_ERR_OK);
+    cpu->vectors_loaded = 0;
+  }
   Context temporary = cpu->context; cpu->context = *context; *context = temporary;
 }
 void touchHLE_DynarmicWrapper_invalidate_cache_range(Cpu *cpu, uint32_t start, uint32_t size) {
@@ -84,9 +92,12 @@ int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *cpu, void *mem, uint64_t *tick
   if (!cpu->mapped) { touchHLE_web_map_memory(mem, cpu); cpu->mapped = 1; }
   Context *c = &cpu->context;
   assert(uc_reg_write(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
-  for (int i = 0; i < 15; ++i) assert(uc_reg_write(cpu->uc, registers[i], &c->regs[i]) == UC_ERR_OK);
-  for (int i = 0; i < 32; ++i) assert(uc_reg_write(cpu->uc, UC_ARM_REG_D0+i, &c->extregs[i*2]) == UC_ERR_OK);
-  assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);
+  assert(uc_reg_write_batch(cpu->uc, registers, cpu->reg_values, 15) == UC_ERR_OK);
+  if (!cpu->vectors_loaded) {
+    for (int i = 0; i < 32; ++i) assert(uc_reg_write(cpu->uc, UC_ARM_REG_D0+i, &c->extregs[i*2]) == UC_ERR_OK);
+    assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);
+    cpu->vectors_loaded = 1;
+  }
   size_t budget = ticks ? (*ticks > 10000 ? 10000 : *ticks) : 1;
   if (!budget) return -1;
   cpu->result = -1;
@@ -99,10 +110,8 @@ int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *cpu, void *mem, uint64_t *tick
   uc_err error = uc_emu_start(cpu->uc, c->regs[15] | ((c->cpsr & 0x20) ? 1 : 0), 0, 0, ticks ? 0 : 1);
   if (!ticks) cpu->executed = touchHLE_uc_executed(cpu->uc);
   if (ticks) *ticks -= cpu->executed > budget ? budget : cpu->executed;
-  for (int i = 0; i < 16; ++i) assert(uc_reg_read(cpu->uc, registers[i], &c->regs[i]) == UC_ERR_OK);
-  for (int i = 0; i < 32; ++i) assert(uc_reg_read(cpu->uc, UC_ARM_REG_D0+i, &c->extregs[i*2]) == UC_ERR_OK);
+  assert(uc_reg_read_batch(cpu->uc, registers, cpu->reg_values, 16) == UC_ERR_OK);
   assert(uc_reg_read(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
-  assert(uc_reg_read(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);
   if (error == UC_ERR_INSN_INVALID) return -3;
   if (error != UC_ERR_OK) {
     fprintf(stderr, "Unicorn: %s at PC=0x%x LR=0x%x CPSR=0x%x\n",
