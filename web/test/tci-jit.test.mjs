@@ -124,6 +124,33 @@ test('compiled-cache eviction clears native dispatch before table slots are reus
   assert.equal(events.at(-3), 'clear');
 });
 
+test('normalized call bridge preserves operand order, wide results and exceptions', () => {
+  for (const dynamic of [false,true]) {
+    const inputs = [0,1,2,3,5,6,7,8,9,10,11,12];
+    let calls = 0, fail = false;
+    const f = fixture([...op('call', ...(dynamic ? [4] : imm(99))), ...exit()],
+      () => { throw Error('Unexpected interpreter call'); },
+      {counter:96,clear(){},call(pc,callee,...args) {
+        calls++;
+        assert.equal(pc,1024); assert.equal(callee,99);
+        assert.deepEqual(args.map(x=>x>>>0),inputs.map(i=>(0x80000000+i)>>>0));
+        if (fail) throw Error('helper exception');
+        return 0xfedcba9876543210n;
+      }});
+    const initialize = () => {
+      for(let i=0;i<16;i++)f.regs()[i]=0x80000000+i;
+      f.regs()[4]=99;
+    };
+    initialize(); f.run();
+    assert.equal(calls,1);
+    assert.equal(f.regs()[0],0x76543210); assert.equal(f.regs()[1],0xfedcba98);
+    assert.equal(f.regs()[2],0x80000002); assert.equal(f.regs()[15],0x8000000f);
+    initialize(); fail=true;
+    assert.throws(()=>f.run(),/helper exception/);
+    assert.equal(calls,2);
+  }
+});
+
 test('inline fixed-region reads preserve bounds, fallback, engine identity and memory growth', () => {
   for (const memop of [2, 0x12, 0x22, 0x72, 10, 0x32]) {
     let calls = 0;

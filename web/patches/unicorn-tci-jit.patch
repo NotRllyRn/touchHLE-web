@@ -31,12 +31,12 @@
 +EM_JS(void, touchhle_tci_reset, (), {
 +    if (Module['tciJit']) Module['tciJit'].reset();
 +});
-+EM_JS(int, touchhle_tci_init, (uintptr_t counter, uintptr_t step, uintptr_t layout), {
++EM_JS(int, touchhle_tci_init, (uintptr_t counter, uintptr_t step, uintptr_t layout, uintptr_t call), {
 +    if (!Module['tciJit'] && Module['enableTciJit']) {
 +        Module['tciJit'] = new globalThis.TouchHLETciJit(wasmMemory,
 +            wasmTable.get(step), addFunction, removeFunction,
 +            Module['tciJitThreshold'] ?? 32,
-+            {counter, clear: wasmExports['touchhle_tci_clear_dispatch'],
++            {counter, call: wasmTable.get(call), clear: wasmExports['touchhle_tci_clear_dispatch'],
 +             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 5)),
 +             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]}});
 +    }
@@ -63,7 +63,7 @@
      for (;;) {
          TCGOpcode opc = tb_ptr[0];
  #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-@@ -550,6 +581,7 @@
+@@ -550,6 +583,7 @@
              label = tci_read_label(&tb_ptr);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr = (uint8_t *)label;
@@ -71,7 +71,7 @@
              continue;
          case INDEX_op_setcond_i32:
              t0 = *tb_ptr++;
-@@ -752,7 +784,8 @@
+@@ -752,7 +786,8 @@
              if (tci_compare32(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -81,7 +81,7 @@
              }
              break;
  #if TCG_TARGET_REG_BITS == 32
-@@ -778,7 +811,8 @@
+@@ -778,7 +813,8 @@
              if (tci_compare64(tmp64, v64, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -91,7 +91,7 @@
              }
              break;
          case INDEX_op_mulu2_i32:
-@@ -1026,7 +1060,8 @@
+@@ -1026,7 +1062,8 @@
              if (tci_compare64(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -101,7 +101,7 @@
              }
              break;
  #if TCG_TARGET_HAS_ext8u_i64
-@@ -1123,7 +1158,7 @@
+@@ -1123,7 +1160,7 @@
              tb_ptr += sizeof(int32_t);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr += (int32_t)t0;
@@ -110,7 +110,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1297,7 +1332,64 @@
+@@ -1273,7 +1310,76 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -124,6 +124,18 @@
 +}
 +
 +#ifdef __EMSCRIPTEN__
++/* Same normalized helper ABI and GETPC as INDEX_op_call, without transferring
++ * TCI locals through memory or decoding the operation again. */
++EMSCRIPTEN_KEEPALIVE uint64_t touchhle_tci_call(uintptr_t pc,
++    helper_function function, uint32_t a0, uint32_t a1, uint32_t a2,
++    uint32_t a3, uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8,
++    uint32_t a9, uint32_t a10, uint32_t a11, uint32_t a12)
++{
++#if defined(GETPC)
++    tci_tb_ptr = pc;
++#endif
++    return function(a0, a1, a2, a3, a5, a6, a7, a8, a9, a10, a11, a12);
++}
 +EMSCRIPTEN_KEEPALIVE uintptr_t touchhle_tci_step(CPUArchState *env,
 +    tcg_target_ulong *regs, uint8_t *ptr, uintptr_t sp, uintptr_t *result)
 +{
@@ -149,7 +161,7 @@
 +            offsetof(ArchCPU, neg.icount_decr.u32) - offsetof(ArchCPU, env)
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
-+            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout);
++            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout, (uintptr_t)touchhle_tci_call);
 +        for (unsigned i = 0; i < NB_OPS; ++i)
 +            touchhle_tci_opcode(i, env->uc->tcg_ctx->tcg_op_defs[i].name);
 +        configured = true;

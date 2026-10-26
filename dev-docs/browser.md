@@ -1881,3 +1881,40 @@ Next candidate: reduce normalized-helper dispatch overhead while preserving
 GETPC and the existing helper implementations; the earlier rejected direct-
 import experiment must not be reinstated without reproducing its multi-instance
 regression and establishing a safer boundary.
+
+### Normalized helper call bridge experiment (2026-10-26)
+
+Generated Wasm now optionally calls one C bridge with the TCI instruction
+location, helper table index and original12-register argument order. The bridge
+sets GETPC's tci_tb_ptr before calling the unchanged normalized helper, returning
+the same64-bit result. This avoids temporary-register spills/reloads and repeated
+TCI decoding. It does not import each QEMU helper directly as the previously
+rejected experiment did. That earlier source/hang is not reproduced here; the
+new boundary must pass repeated-instance, exception and full-game validation
+on its own. Runtimes without this bridge retain the old interpreter-helper path.
+
+JS22 pass, including immediate/register callees, argument order, wide result,
+exception propagation and preserved temporaries. Actual Node/Chromium CPU/fibers
+pass, including repeated engines/instances, all floating-point fingerprints,
+fault/cache/budget/context coverage. No hangs or compilation failures in these
+runs: `target/jit-call-bridge-{js,build,node,browser}.log`. Patch changes are merged
+into the original TCI patch so independent idempotence checks still work; eight-
+patch reverse/reapply byte comparison, repeated patch application, formatting
+and diff checks pass. Existing budget-patch EOF whitespace warning remains.
+
+Same-Wasm enabled/disabled/enabled five-trial medians, Node22 with Asyncify and
+no concurrent game/build (ms): zero-add25.079/27.756/21.816, zero-multiply23.138/
+25.161/18.413, normal-add24.985/27.080/22.024, normal-multiply23.466/25.277/19.187,
+SVC109.430/116.563/106.348. Other medians: tiny6.006/4.234/3.091, medium4.960/
+3.508/3.289, long5.938/4.915/5.298, doubleword4.950/7.047/4.703, code-page
+memory52.705/52.485/51.469, data-memory6.685/8.505/6.086. Warmup/noise remains;
+these are microbenchmarks, not game speed. Logs: `target/jit-call-bridge-
+{benchmark,comparison}.log`. Full runtime/HLE rebuild and game checks pending.
+
+Call-bridge full runtime rebuild succeeds (`target/jit-call-bridge-runtime-build.log`),
+then nine forced-JIT graphics fixtures pass twice with zero compilation failures
+and static GET-only traffic. Actual Web Audio passes. Logs:
+`target/jit-call-bridge-TEST_*.log`, `target/jit-call-bridge-audio.log`.
+Retain the bridge for its isolated measured benefit after these regressions.
+Fresh clean TinkerBox loading/gameplay measurement is next; game performance
+and final hardware/browser acceptance remain outstanding.

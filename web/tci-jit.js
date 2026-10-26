@@ -81,7 +81,7 @@
           this.liveModules = 0;
         }
         const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes),
-          { e: { m: this.memory, s: this.step } });
+          { e: { m: this.memory, s: this.step, c: this.dispatch?.call } });
         block.fn = this.addFunction(instance.exports.run, 'iiiii');
         block.bytes = bytes.length;
         this.liveModules++;
@@ -207,6 +207,12 @@
           constant(0); emit(0x48); reg(2); emit(0x45, 0x71, 0x04, 0x40);
           helper(pc, [0,1,2,3,5,6,7,8,9,10,11,12], [0,1]);
           emit(0x05); constant(0); put(0); constant(0); put(1); emit(0x0b);
+        } else if (name === 'call' && this.dispatch?.call) {
+          constant(pc); operand();
+          for (const i of [0,1,2,3,5,6,7,8,9,10,11,12]) reg(i);
+          emit(0x10, 1); set(20);
+          get(20); emit(0xa7); put(0);
+          get(20); emit(0x42, 32, 0x88, 0xa7); put(1);
         } else if (name === 'exit_tb') {
           save(); get(3); constant(word()); emit(0x36, 2, 0); word();
           constant(0); emit(0x0f);
@@ -281,12 +287,14 @@
       const body = [3, 16, 0x7f, 1, 0x7e, 2, 0x7f, ...out];
       return new Uint8Array([
         0, 97, 115, 109, 1, 0, 0, 0,
-        ...section(1, [2, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
-          0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f]),
-        ...section(2, [2, ...str('e'), ...str('m'), 2, 0, 0,
-          ...str('e'), ...str('s'), 0, 0]),
+        ...section(1, [3, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
+          0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
+          0x60, 14, ...Array(14).fill(0x7f), 1, 0x7e]),
+        ...section(2, [this.dispatch?.call ? 3 : 2, ...str('e'), ...str('m'), 2, 0, 0,
+          ...str('e'), ...str('s'), 0, 0,
+          ...(this.dispatch?.call ? [...str('e'), ...str('c'), 0, 2] : [])]),
         ...section(3, [1, 1]),
-        ...section(7, [1, ...str('run'), 0, 1]),
+        ...section(7, [1, ...str('run'), 0, this.dispatch?.call ? 2 : 1]),
         ...section(10, [1, ...uleb(body.length), ...body]),
       ]);
     }

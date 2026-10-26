@@ -111,3 +111,11 @@ Doubleword reads use an i64 Wasm load only for aligned, bounded little-endian
 64-bit accesses in the opted-in adapter mappings, then split into TCI low/high
 registers. Other formats retain Unicorn helpers. Payload bits, register aliasing,
 mapping boundaries, growth and actual VFP memory faults are regression-tested.
+
+Normalized TCI helper calls may use one raw Wasm C bridge. Generated code passes
+the instruction address, helper index, and12 arguments in the original TCI ABI
+order; C records GETPC and invokes the unchanged adapter. The returned i64 is
+split into r0/r1. This preserves exception bookkeeping without saving all helper
+arguments into the interpreter's temporary array. Memory helpers still use the
+existing single-operation path when inline access is ineligible. Older runtime
+artifacts without the bridge continue to use the original helper path.

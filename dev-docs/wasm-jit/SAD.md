@@ -83,3 +83,13 @@ because ARM mode switches bank r8-r14. VFP retains its lazy context transfer.
 This removes per-register API dispatch without changing native Dynarmic or the
 Rust call boundary. Mode-bank, context, stepping and exception regressions gate
 the change; HLE-transition benchmarks measure its intended benefit.
+
+## Helper dispatch boundary
+
+A single C call bridge preserves the normalized QEMU helper ABI and GETPC while
+accepting arguments directly from generated Wasm locals. It imports no individual
+QEMU helper into a generated module. This avoids the previously rejected direct-
+helper-import architecture and retains its arithmetic/exception implementations.
+The original single-operation interpreter remains the memory/unsupported path
+and the compatibility path for a runtime without this bridge. Repeated-instance,
+CPU exception, floating-point fingerprint and fiber tests gate integration.

@@ -191,3 +191,13 @@ retained49,152-operation result/FPSCR corpus and zero/normal FP benchmarks.
 Rebuilt actual Node/Chromium CPU/fibers and benchmark pass. Doubleword game
 confirms Lesson2 SUCCESS968 s, then Lesson3. Next: measured helper-dispatch
 overhead, preserving GETPC/exception and multi-instance semantics. Goal active.
+
+Normalized call bridge prototype passes JS22 and actual Node/Chromium CPU/
+fibers, including FP fingerprints and repeated instances. It preserves GETPC
+and calls the unchanged C helper ABI without per-helper imports. Same-Wasm
+enabled/disabled/enabled normal-add24.985/27.080/22.024 ms, normal-multiply
+23.466/25.277/19.187, SVC109.430/116.563/106.348. Eight-patch roundtrip and
+idempotence pass. Full runtime/HLE/game checks pending; goal remains active.
+
+Call-bridge full runtime, nine forced-JIT graphics fixtures twice and audio pass.
+Retain pending fresh clean game timing/correctness; M4/M5 remain open.
