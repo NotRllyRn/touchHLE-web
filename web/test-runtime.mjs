@@ -23,6 +23,11 @@ try {
     assert.match(output, /PASS real touchHLE ARM guest called puts and exit/);
     assert.match(output, /Guest exited with status 0/);
     assert.doesNotMatch(output, /panicked|Runtime failed|native code called abort/);
+    if (new URL(origin).searchParams.get('cpu') === 'jit') {
+      const stats = JSON.parse(output.match(/CPU JIT (\{[^\n]+\})/)[1]);
+      assert.ok(stats.compiled > 0, 'Must compile actual guest blocks');
+      assert.equal(stats.failed, 0, stats.lastFailure);
+    }
     console.log(`PASS actual HLE IPA run ${attempt + 1}`);
   }
   assert.deepEqual(errors, []);

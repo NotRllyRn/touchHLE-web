@@ -125,5 +125,7 @@ run.onclick = async () => {
     attachInput(replacement, message => worker?.postMessage(message));
     canvas = replacement.transferControlToOffscreen();
   }
-  worker.postMessage({ type: 'start', file: selectedFile, headless, canvas, audioClock }, canvas ? [canvas] : []);
+  worker.postMessage({ type: 'start', file: selectedFile, headless, canvas, audioClock,
+    cpuBackend: new URLSearchParams(location.search).get('cpu'),
+    jitThreshold: new URLSearchParams(location.search).get('jitThreshold') === '1' ? 1 : 32 }, canvas ? [canvas] : []);
 };

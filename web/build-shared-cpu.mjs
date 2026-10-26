@@ -20,14 +20,23 @@ execFileSync('emcc', ['web/fixtures/cpu/main.c', 'web/fixtures/cpu/adapter.c',
   '-O2', '-sASSERTIONS=2', '-sALLOW_MEMORY_GROWTH=1', '-sASYNCIFY=1',
   '-sSTACK_OVERFLOW_CHECK=2',
   '-sSUPPORT_LONGJMP=wasm',
+  '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
+  '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
   '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]',
   '-sMODULARIZE=1', '-sEXPORT_NAME=createSharedCpuChecks', '-sENVIRONMENT=web,worker,node',
   '-o', 'web/dist/shared-cpu-checks.js'], { cwd: root, stdio: 'inherit' });
 await writeFile(`${root}web/dist/shared-cpu-worker.js`, `// SPDX-License-Identifier: MPL-2.0
 importScripts('./shared-cpu-checks.js');
+let summary;
 createSharedCpuChecks({
-  print: message => self.postMessage({ message }),
+  enableTciJit: new URL(self.location.href).searchParams.has('jit'),
+  tciJitThreshold: 1,
+  print: message => {
+    if (message.startsWith('PASS ')) summary = message;
+    else self.postMessage({ message });
+  },
   printErr: warning => self.postMessage({ warning }),
   onAbort: error => self.postMessage({ error: String(error) }),
-}).catch(error => self.postMessage({ error: String(error) }));
+}).then(runtime => self.postMessage({ message: summary, stats: runtime.tciJit?.stats }))
+  .catch(error => self.postMessage({ error: String(error) }));
 `);

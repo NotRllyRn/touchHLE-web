@@ -11,8 +11,8 @@ try {
   const url = process.env.TEST_URL || 'http://127.0.0.1:8765';
   await page.goto(url);
   if (process.env.TEST_SHARED_CPU) {
-    const result = await page.evaluate(() => new Promise((resolve, reject) => {
-      const worker = new Worker('./shared-cpu-worker.js');
+    const result = await page.evaluate(jit => new Promise((resolve, reject) => {
+      const worker = new Worker('./shared-cpu-worker.js' + (jit ? '?jit' : ''));
       const warnings = [];
       const timeout = setTimeout(() => {
         worker.terminate();
@@ -27,11 +27,15 @@ try {
         if (data.warning) { warnings.push(data.warning); return; }
         if (data.error) finish(() => reject(new Error(data.error)));
         else if (data.message?.startsWith('PASS ')) {
-          finish(() => resolve({ message: data.message, warnings }));
+          finish(() => resolve({ message: data.message, warnings, stats: data.stats }));
         }
       };
       worker.onerror = event => finish(() => reject(new Error(event.message)));
-    }));
+    }), Boolean(process.env.TEST_JIT));
+    if (process.env.TEST_JIT) {
+      assert.ok(result.stats.hits > 0, 'Must execute compiled code');
+      assert.equal(result.stats.failed, 0, result.stats.lastFailure);
+    }
     assert.match(result.message, /^PASS source-built Unicorn\/Rust/);
     console.log(result);
   }

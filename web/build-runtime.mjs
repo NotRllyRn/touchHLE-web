@@ -12,7 +12,7 @@ for (const [directory, expected] of [
   const actual = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: `${root}${directory}`, encoding: 'utf8' }).trim();
   if (actual !== expected) throw new Error(`Unexpected Unicorn source revision: ${actual}`);
 }
-for (const patch of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch']) {
+for (const patch of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch', 'unicorn-tci-jit.patch']) {
   execFileSync('git', ['apply', '--reverse', '--check', `${root}web/patches/${patch}`],
     { cwd: `${root}target/unicorn.js/unicorn`, stdio: 'inherit' });
 }
@@ -32,6 +32,8 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
   '--post-js', 'web/emscripten-gl-init.js',
   '--no-entry', '-O2', '-g2', '-sSTACK_OVERFLOW_CHECK=2', '-sASYNCIFY=1', '-sASYNCIFY_STACK_SIZE=2097152',
   '-sSUPPORT_LONGJMP=wasm',
+  '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
+  '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
   // CPU hooks only count, stop, or report faults. They never suspend; Rust
   // dispatches HLE calls after the interpreter returns. Keep fibers instrumented.
   '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]',

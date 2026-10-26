@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: MPL-2.0
+// Runtime compiler for the pinned Unicorn 32-bit TCI bytecode. No ARM decoder.
+// Loaded as Emscripten pre-js and directly by the dependency-free Node tests.
+(() => {
+  const uleb = value => {
+    const bytes = [];
+    do { const byte = value & 127; value >>>= 7; bytes.push(byte | (value ? 128 : 0)); } while (value);
+    return bytes;
+  };
+  const sleb = value => {
+    const bytes = [];
+    value |= 0;
+    for (;;) {
+      const byte = value & 127;
+      value >>= 7;
+      const done = (value === 0 && !(byte & 64)) || (value === -1 && (byte & 64));
+      bytes.push(byte | (done ? 0 : 128));
+      if (done) return bytes;
+    }
+  };
+  const str = text => [text.length, ...Array.from(text, c => c.charCodeAt(0))];
+  const section = (id, bytes) => [id, ...uleb(bytes.length), ...bytes];
+  const binary = { add_i32: 0x6a, sub_i32: 0x6b, mul_i32: 0x6c,
+    and_i32: 0x71, or_i32: 0x72, xor_i32: 0x73, shl_i32: 0x74,
+    sar_i32: 0x75, shr_i32: 0x76, rotl_i32: 0x77, rotr_i32: 0x78 };
+  const compare32 = { 8: 0x46, 9: 0x47, 2: 0x48, 3: 0x4e,
+    4: 0x49, 5: 0x4f, 10: 0x4c, 11: 0x4a, 12: 0x4d, 13: 0x4b };
+
+  class TouchHLETciJit {
+    constructor(memory, step, addFunction, removeFunction, threshold = 32) {
+      this.memory = memory;
+      this.step = step;
+      this.addFunction = addFunction;
+      this.removeFunction = removeFunction;
+      this.threshold = threshold;
+      this.names = [];
+      this.blocks = new Map();
+      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0 };
+    }
+    reset() {
+      for (const block of this.blocks.values()) if (block.fn) this.removeFunction(block.fn);
+      this.blocks.clear();
+      this.stats.resets++;
+    }
+    register(ptr, size) {
+      const old = this.blocks.get(ptr);
+      if (old?.fn) this.removeFunction(old.fn);
+      // Bound metadata/module retention, including permanently cold blocks.
+      if (this.blocks.size >= 16384) this.reset();
+      this.blocks.set(ptr, { size, count: 0, fn: 0, failed: false });
+    }
+    lookup(ptr) {
+      const block = this.blocks.get(ptr);
+      if (!block || block.failed) return 0;
+      if (block.fn) { this.stats.hits++; return block.fn; }
+      if (++block.count < this.threshold) return 0;
+      const start = performance.now();
+      try {
+        const bytes = this.compile(ptr, block.size);
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes),
+          { e: { m: this.memory, s: this.step } });
+        block.fn = this.addFunction(instance.exports.run, 'iiiii');
+        this.stats.compiled++;
+        this.stats.bytes += bytes.length;
+      } catch (error) {
+        block.failed = true;
+        this.stats.failed++;
+        this.stats.lastFailure = String(error);
+      }
+      this.stats.compileMs += performance.now() - start;
+      return block.fn;
+    }
+    compile(start, length) {
+      if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
+        throw new Error('Invalid TCI block bounds');
+      const view = new DataView(this.memory.buffer);
+      const ops = [], targets = new Set();
+      for (let pc = start; pc < start + length;) {
+        const size = view.getUint8(pc + 1), name = this.names[view.getUint8(pc)];
+        if (!name || size < 2 || pc + size > start + length) throw new Error('Invalid TCI operation');
+        let target;
+        if (name === 'br' || name === 'brcond_i32' || name === 'brcond2_i32') {
+          target = view.getUint32(pc + size - 4, true);
+          if (target <= pc || target >= start + length) throw new Error('Non-forward TCI branch');
+          targets.add(target);
+        }
+        ops.push({ pc, size, name, target });
+        pc += size;
+      }
+      const boundaries = new Set(ops.map(op => op.pc));
+      if ([...targets].some(target => !boundaries.has(target))) throw new Error('Invalid branch target');
+      const labels = [...targets].sort((a, b) => a - b);
+      const out = [];
+      const emit = (...bytes) => out.push(...bytes);
+      const get = i => emit(0x20, ...uleb(i));
+      const set = i => emit(0x21, ...uleb(i));
+      const constant = value => emit(0x41, ...sleb(value));
+      const reg = i => { if (i > 15) throw new Error('Invalid TCI register'); get(i + 4); };
+      const put = i => { if (i > 13) throw new Error('Invalid TCI destination'); set(i + 4); };
+      const save = (indices = Array.from({ length: 16 }, (_, i) => i)) => {
+        for (const i of indices) { get(1); reg(i); emit(0x36, 2, ...uleb(i * 4)); }
+      };
+      const restore = (indices = Array.from({ length: 16 }, (_, i) => i)) => {
+        for (const i of indices) { get(1); emit(0x28, 2, ...uleb(i * 4)); set(i + 4); }
+      };
+      restore();
+      for (const _ of labels) emit(0x02, 0x40);
+      for (const { pc, size, name, target } of ops) {
+        if (labels[0] === pc) { emit(0x0b); labels.shift(); }
+        let cursor = pc + 2;
+        const byte = () => view.getUint8(cursor++);
+        const word = () => { const value = view.getUint32(cursor, true); cursor += 4; return value; };
+        const operand = () => { const r = byte(); if (r === 255) constant(word()); else reg(r); };
+        const pair = immediate => {
+          if (immediate) operand(); else reg(byte());
+          emit(0xad); // i64.extend_i32_u
+          if (immediate) operand(); else reg(byte());
+          emit(0xad, 0x42, 32, 0x86, 0x84); // high << 32 | low
+        };
+        const condition = wide => {
+          const value = byte(), op = compare32[value];
+          if (!op) throw new Error(`Unsupported TCI condition ${value}`);
+          emit(op + (wide ? 11 : 0));
+        };
+        if (binary[name]) {
+          const dst = byte(); operand(); operand(); emit(binary[name]); put(dst);
+        } else if (name === 'movi_i32') {
+          const dst = byte(); constant(word()); put(dst);
+        } else if (name === 'mov_i32') {
+          const dst = byte(); reg(byte()); put(dst);
+        } else if (['ld_i32', 'ld8u_i32', 'st_i32', 'st8_i32', 'st16_i32'].includes(name)) {
+          const r = byte(); reg(byte()); constant(word()); emit(0x6a);
+          if (name.startsWith('ld')) { emit(name === 'ld_i32' ? 0x28 : 0x2d, 0, 0); put(r); }
+          else { reg(r); emit({ st_i32: 0x36, st8_i32: 0x3a, st16_i32: 0x3b }[name], 0, 0); }
+        } else if (name === 'br') {
+          word(); emit(0x0c, ...uleb(labels.indexOf(target)));
+        } else if (name === 'brcond_i32' || name === 'setcond_i32') {
+          const dst = name === 'setcond_i32' ? byte() : null;
+          reg(byte()); operand(); condition(false);
+          if (dst !== null) put(dst);
+          else { word(); emit(0x0d, ...uleb(labels.indexOf(target))); }
+        } else if (name === 'brcond2_i32' || name === 'setcond2_i32') {
+          const dst = name === 'setcond2_i32' ? byte() : null;
+          pair(false); pair(true); condition(true);
+          if (dst !== null) put(dst);
+          else { word(); emit(0x0d, ...uleb(labels.indexOf(target))); }
+        } else if (['add2_i32', 'sub2_i32', 'mulu2_i32'].includes(name)) {
+          const low = byte(), high = byte();
+          if (name === 'mulu2_i32') { reg(byte()); emit(0xad); reg(byte()); emit(0xad, 0x7e); }
+          else { pair(false); pair(false); emit(name === 'add2_i32' ? 0x7c : 0x7d); }
+          set(20); get(20); emit(0xa7); put(low);
+          get(20); emit(0x42, 32, 0x88, 0xa7); put(high);
+        } else if (['ext8s_i32', 'ext16s_i32', 'ext8u_i32', 'ext16u_i32', 'not_i32', 'neg_i32'].includes(name)) {
+          const dst = byte(), src = byte();
+          if (name === 'neg_i32') { constant(0); reg(src); emit(0x6b); }
+          else {
+            reg(src);
+            if (name === 'ext8s_i32') emit(0xc0);
+            else if (name === 'ext16s_i32') emit(0xc1);
+            else { constant(name === 'not_i32' ? -1 : name === 'ext8u_i32' ? 255 : 65535); emit(name === 'not_i32' ? 0x73 : 0x71); }
+          }
+          put(dst);
+        } else if (name === 'deposit_i32') {
+          const dst = byte(), a = byte(), b = byte(), shift = byte(), bits = byte();
+          const mask = ((2 ** bits - 1) << shift) | 0;
+          reg(a); constant(~mask); emit(0x71); reg(b); constant(shift); emit(0x74);
+          constant(mask); emit(0x71, 0x72); put(dst);
+        } else if (name === 'exit_tb') {
+          save(); get(3); constant(word()); emit(0x36, 2, 0); word();
+          constant(0); emit(0x0f);
+        } else if (name === 'goto_tb') {
+          // Unicorn patches this relative displacement when linking/unlinking TBs.
+          // Read it at execution time; never bake a mutable link into generated code.
+          const address = (pc + 5) & ~3;
+          save(); constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a, 0x0f);
+          cursor = pc + size;
+        } else if (name === 'mb') {
+          // Worker memory is unshared; TCI's fence has no additional effect.
+        } else {
+          // Preserve QEMU memory/exception/VFP semantics via the same interpreter
+          // operation. Helpers cannot yield; exceptions propagate through Wasm.
+          save(); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
+          restore(); cursor = pc + size;
+        }
+        if (cursor !== pc + size) throw new Error(`TCI operand mismatch: ${name}`);
+      }
+      if (labels.length) throw new Error('Unresolved TCI labels');
+      emit(0x00, 0x0b); // Falling off a translated block is an internal error.
+      const body = [2, 16, 0x7f, 1, 0x7e, ...out];
+      return new Uint8Array([
+        0, 97, 115, 109, 1, 0, 0, 0,
+        ...section(1, [2, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
+          0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f]),
+        ...section(2, [2, ...str('e'), ...str('m'), 2, 0, 0,
+          ...str('e'), ...str('s'), 0, 0]),
+        ...section(3, [1, 1]),
+        ...section(7, [1, ...str('run'), 0, 1]),
+        ...section(10, [1, ...uleb(body.length), ...body]),
+      ]);
+    }
+  }
+  globalThis.TouchHLETciJit = TouchHLETciJit;
+})();

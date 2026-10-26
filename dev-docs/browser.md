@@ -1103,3 +1103,53 @@ Acceleration baseline checks (2026-10-26): `cargo fmt --all --check`,
 (30 tests), and `cd web && npm run build && npm test` (7 tests) pass.
 The pre-existing browser integration is being committed as the preserved source
 baseline, separately from the acceleration design and implementation.
+Baseline source and plans were committed together in 0780424e. The first staged
+whitespace check flagged blank unified-diff context lines in existing patches;
+the initial unstaged check had not inspected untracked files. `.gitattributes`
+now disables only end-of-line whitespace checking for patch files, whose blank
+context marker is required syntax. Other files retain the normal checks.
+T3 preview_open failed: "Chrome will not start its sandbox as root". Browser
+validation uses the documented standalone Chromium workflow.
+
+TCI-to-Wasm prototype (2026-10-26, opt-in; not game acceptance):
+- Added runtime Wasm emission over pinned Unicorn TCI, preserving the original
+  interpreter for helper operations and cold blocks. Generated modules share
+  runtime memory; dynamic TB links are read at execution time. Cache entries
+  are replaced on retranslation and cleared on translation flush.
+- `node --test web/test/tci-jit.test.mjs`: 6 groups pass, including 8,000 seeded
+  integer/shift cases, comparisons/branches, 64-bit arithmetic, memory growth,
+  mutable links, fallback state transfer and cache replacement/reset.
+- `source target/emsdk/emsdk_env.sh; node web/patch-unicorn.mjs; node
+  web/build-shared-cpu.mjs`: builds pass, retaining upstream unused-function
+  warnings and fixture dead-code warnings. Shared CPU/fiber suite passes in
+  Node for interpreter and forced JIT. JIT: 239 compiled blocks, 61,036 cache
+  hits, zero compile failures; log `target/jit-shared-node.log`.
+- `TEST_SHARED_CPU=1 TEST_JIT=1 TEST_FIBERS=1
+  PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+  node web/test-browser.mjs`: passes in Chromium 141 with no page errors;
+  log `target/jit-shared-browser.log`. Unsupported madvise/mprotect warnings
+  remain, as before. These tests include guest fault handling and nested fibers.
+- `source target/emsdk/emsdk_env.sh; node web/bench-cpu.mjs`: original ARM
+  loops through the production adapter, 5 fresh CPU instances per case/backend.
+  Node v22.22.3 on Intel i9-13900H, Linux x86_64. Median milliseconds:
+  300,001 instructions: interpreter 52.891, JIT 56.475 (6.8% slower);
+  1,000,001: 79.531 vs 48.590 (1.64x);
+  6,600,001: 300.744 vs 52.991 (5.68x).
+  First-trial compilation/tiering is included. Log `target/jit-cpu-benchmark.log`.
+  This synthetic arithmetic result is not FPS or TinkerBox load time.
+- Full runtime build passes (`target/jit-runtime-build.log`). Current JIT is
+  selected by `?cpu=jit`; `&jitThreshold=1` forces early compilation for tests.
+  Default remains interpreter. Full-game profiling/regressions are in progress.
+The first full-runtime HLE/mipmap checks failed during instantiation with
+`Import #457 "env" "touchhle_tci_init": function import requires a callable`;
+the attempted startup profile then found no runtime worker. Failed logs are
+`target/jit-runtime-{hle,mipmap}.log` and `target/jit-profile.log`. Investigation
+includes ruling out mismatched JS/Wasm served during the ongoing runtime link.
+No game result is claimed from those attempts.
+After waiting for the full link to finish, instantiation succeeds without a
+linkage code change: the earlier failure served mismatched JS/Wasm during build.
+A subsequent harness failure was missing final counters when ExitStatus reached
+the worker catch instead of onExit; both paths now report counters. Final
+forced-JIT HLE and MIPMAP fixtures pass twice in Chromium, requiring compiled
+blocks and zero compile failures (`target/jit-runtime-hle-final.log`,
+`target/jit-runtime-mipmap-final.log`). Do not test served dist during a build.
