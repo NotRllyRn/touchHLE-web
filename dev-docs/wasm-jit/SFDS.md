@@ -201,3 +201,12 @@ to u8, return the original destination, and reject checked-buffer overflow
 before writing. Native uses the same bounded algorithm; wide memset is unchanged.
 Validate an original ARM guest against old/new implementations, native tests,
 page-crossing sentinels and guest-timed fill throughput before game measurements.
+
+
+## Long arithmetic regression workloads
+
+Benchmark32 dependent VADD instructions per loop with ordinary finite operands
+and with a canonical quiet NaN plus zero. Verify result bits and FPSCR for both
+clear and sticky inexact. The latter exercises repeated helper fallback observed
+during game startup. Report these separately from one-operation loops so moving
+rare paths out of a compiled block cannot hide a fallback-heavy regression.

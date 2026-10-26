@@ -403,3 +403,16 @@ Restoration complete: runtime/shared CPU, Node/Chromium CPU/cache/fibers, HLE gu
 twice and formatting all pass. Smaller-table production81561e72 restored,
 no game running. Save negative evidence; next named-block startup profile remains
 pending. Goal remains active, not achieved.
+
+
+Named startup sampling identifies long float-heavy blocks and scratch spills.
+Private scratch promotion passes correctness but shows no convincing throughput
+win, even with size gate; reject it, retaining32-add chain benchmark. Smaller
+float guard side-exit experiment now passes JS29 and Node CPU regressions;
+Chromium and isolated comparison pending. No new performance claim or goal closure.
+
+Side exits also rejected: no finite-chain gain and NaN+zero chain~47–49% slower.
+Actual changed code confirmed despite coincidentally equal byte totals. Restore
+production compiler/metadata; retain finite/fallback long-chain benchmarks and
+startup profile evidence. Restoration CPU/benchmark validation pending. Full game
+runtime stayed on b0ec3cd5 throughout these experiments; game targets remain open.

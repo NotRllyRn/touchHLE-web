@@ -2784,3 +2784,85 @@ game remains. Production code remains81561e72; only negative experiment evidence
 is retained in this follow-up. Next sample named blocks during CPU-bound startup
 before applying any further compiler optimization; real-time/device goals remain
 open and opt-in JIT remains appropriate.
+
+
+Named startup profile on production b0ec3cd5 (diagnostic name sections added as
+blocks first compile; no cache flush):13481 samples, CPU1552, lookup863,
+dispatcher817, HLE run_call754; hottest generated blocks550/275/216 samples.
+Top block has304 stores/402 loads, including68 pairs at private scratch offsets
+-504/-500. Second has793 stores/1090 loads and230 pairs at those offsets.
+Artifacts target/jit-named-startup-{game,profile}.log, jit-named-startup.png.
+Inspector150 s run ended normally. This profile establishes CPU-heavy startup,
+unlike the previous mostly idle later-training sample.
+
+Candidate promotes aligned private TCI scratch slots to Wasm locals. Pinned
+backend reserves r15, uses negative frame offsets, and passes normalized helper
+arguments through registers (tcg-target.inc.c tcg_out_call/tcg_set_frame).
+C exports actual private-frame size; older runtime metadata keeps memory path.
+Reject promotion for any exposed r15 value, partial/out-of-frame access or opaque
+helper requiring full state. Initialize used slots from frame at block entry,
+keep locals over same-block backedges, flush written slots at ordinary exits.
+The frame is host-private scratch, not guest RAM or CPU architectural state;
+normalized helpers cannot alias it unless its address escapes. Existing guest
+memory checks and helper behavior are unchanged. Edits apply only after full
+block inspection; unknown paths conservatively retain original emitted code.
+
+JS32 tests pass (target/jit-stack-locals-final-js.log), including seeded branch/
+call comparisons against unpromoted compiler, memory growth, linked exits,
+backedges/unlinking, address escape, opaque helper and byte-write fallback.
+Formatting passes. Actual ARM/CPU/cache/fiber checks are running; throughput and
+game gains remain unproven. Candidate is not committed.
+
+Initial unrestricted promotion passes actual Node/Chromium CPU/cache/fiber tests,
+but benchmark corpus grows180403 vs165723 bytes (+8.9%) and small loops show no
+broad gain (linked111.849/108.691/111.595 ms new/old/new; sticky NaN add
+3.796/2.947/3.808). Do not retain that version. Add exact emitted-byte gate:
+rewritten accesses must save more bytes than slot entry loads, exit flushes and
+local declaration growth cost. Tiny blocks retain original code. Tests now use
+profitable repeated spills and assert generated size shrinks so the optimization
+is actually exercised. JS32 still pass. Add32-dependent-VADD chain workload,
+3,400,006 guest instructions per trial, to represent larger arithmetic blocks.
+Gated benchmark running; logs target/jit-stack-locals-{comparison,gated-*}.log.
+
+Gated scratch promotion also lacks convincing throughput benefit. Same-runtime
+new/old/new medians:32-add chain143.337/138.194/133.391 ms, sticky chain
+85.306/77.548/81.606; emitted300623/305573/300623 bytes (1.6% smaller) but
+compilation364.6/254.5/310.8 ms. Retain representative chain benchmark, not scratch
+promotion. Prototype saved locally as target/stack-locals-prototype.patch and
+ tci-jit-stack-locals-gated.js; compiler/metadata/tests restored before next trial.
+No scratch promotion enters production.
+
+Second named startup sample confirms hottest blocks are float-helper heavy:
+first block511 samples with28 adds,28 multiplies,16 subtracts; second229 samples
+with100 adds,48 multiplies,82 subtracts. Raw TCI for top three stays local under
+ target/jit-named-startup-calls-profile.log (never commit derived game bytes).
+This supports the VFP chain workload. Diagnostic150 s run ends normally.
+
+Next candidate: explicit partialFallback metadata permits a failed float guard
+to save TCI temporaries and return its call PC, so C interprets from that point.
+Successful math does not rejoin a helper import in the generated function.
+JS29 and actual Node CPU tests pass so far; Chromium checks/benchmarks pending.
+This can regress workloads with frequent failures; compare before retention.
+
+Float side-exit experiment rejected. First equal code-size totals were checked:
+metadata partialFallback is true,385 matching float calls and75 generated blocks
+change instructions; equal lengths were coincidental, not a missing feature.
+Diagnostic target/jit-float-side-exit-metadata.log confirms actual exercise.
+
+Final same-runtime new/old/new comparison (five trials each): normal32-add chain
+145.020/138.809/143.495 ms; sticky77.708/76.705/76.456. Canonical-NaN-plus-zero
+chain811.560/548.243/804.832, sticky807.213/543.254/808.671 (~47–49% slower).
+Linked108.339/108.319/107.899 and SVC117.969/117.422/117.325. No fast-path gain
+justifies interpreting tails on fallback.154 modules,445423 bytes, zero failures
+per group. Logs target/jit-float-side-exit-fallback-{benchmark,comparison}.log.
+Restore production compiler/metadata/tests; retain new finite/fallback VFP chain
+benchmarks and negative evidence. No game run needed for this rejected regression.
+Production full runtime was never relinked for either candidate; shared CPU and
+benchmark artifacts are being rebuilt to match restored source.
+
+Restored baseline passes JS28, actual Node/Chromium ARM/FPSCR/cache/fibers and
+expanded interpreter/JIT benchmarks, including both32-add chains with exact
+result/flag assertions. Logs target/jit-vfp-chains-restored-{js,build,node,browser,
+benchmark}.log. Full game runtime remains unchanged. Next measured candidate is
+an exact canonical quiet-NaN/positive-zero shortcut within the existing fallback
+branch, preserving ordinary fast-path cost; verify pinned ARM NaN/zero flags.
