@@ -233,6 +233,37 @@ void adapter_checks(void) {
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
     for (unsigned r = 8; r < 15; ++r) assert(regs[r] == 0x12340000 + mode * 16 + r);
   }
+  // Pin exact result bits and FPSCR against the unmodified software-float
+  // implementation, including all ARM rounding modes, FZ/DN and sticky flags.
+  const uint32_t fp_ops[] = {0xee301a20, 0xee301a60, 0xee201a20}; // add/sub/mul s2,s0,s1
+  const uint32_t edge[] = {0,0x80000000,0x3f800000,0xbf800000,0x40000000,
+    0xc0000000,0x00800000,0x80800000,0x7f7fffff,0xff7fffff,1,0x80000001,
+    0x007fffff,0x807fffff,0x7f800000,0xff800000,0x7fc12345,0xffc12345,0x7f812345,0xff812345};
+  for (unsigned op = 0; op < 3; ++op) {
+    code[0] = 0xee000a10; code[1] = 0xee001a90; // vmov s0,r0; vmov s1,r1
+    code[2] = 0xeee12a10; code[3] = fp_ops[op]; // vmsr fpscr,r2; operation
+    code[4] = 0xee110a10; code[5] = 0xeef11a10; code[6] = 0xef000042;
+    touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+    const uint32_t simple[] = {0x40400000,0xbf800000,0x40000000};
+    regs[0] = 0x3f800000; regs[1] = 0x40000000; regs[2] = 0;
+    regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(regs[0] == simple[op] && regs[1] == 0);
+    uint32_t hash = 2166136261u, seed = 0x12345678;
+    for (unsigned mode = 0; mode < 32; ++mode) for (unsigned item = 0; item < 512; ++item) {
+      seed = seed * 1664525u + 1013904223u;
+      regs[0] = item < 400 ? edge[item / 20] : seed;
+      seed = seed * 1664525u + 1013904223u;
+      regs[1] = item < 400 ? edge[item % 20] : seed;
+      regs[2] = ((mode & 3) << 22) | ((mode & 4) << 22) | ((mode & 8) << 22) | (mode & 16 ? 0x9f : 0);
+      regs[15] = 0x1000; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+      hash = (hash ^ regs[0]) * 16777619u;
+      hash = (hash ^ regs[1]) * 16777619u;
+    }
+    const uint32_t reference[] = {0x3e25bbf3,0xfa74602e,0x4a539c72};
+    assert(hash == reference[op]);
+  }
   touchHLE_DynarmicWrapper_delete(cpu);
   free(code);
 }

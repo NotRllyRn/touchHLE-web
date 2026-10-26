@@ -41,6 +41,32 @@ int main(void) {
     }
     free(code);
   }
+  for (unsigned kind = 0; kind < 4; ++kind) for (unsigned trial = 0; trial < 5; ++trial) {
+    uint32_t *code = calloc(1, 8192);
+    code[0] = 0xee000a10; code[1] = 0xee001a90; code[2] = 0xeee12a10;
+    code[3] = kind & 1 ? 0xee200a20 : 0xee300a20; // vmul/vadd s0,s0,s1
+    code[4] = 0xe2533001; code[5] = 0x1afffffc; // subs r3,#1; bne
+    code[6] = 0xee100a10; code[7] = 0xeef11a10; code[8] = 0xef000042;
+    Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
+    uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
+    regs[0] = 0x3f800000; regs[1] = kind >= 2 ? 0x3f800000 : 0;
+    regs[2] = 0; regs[3] = 100000; regs[15] = 0x1000;
+    double start = emscripten_get_now();
+    int result;
+    unsigned slices = 0;
+    do {
+      assert(++slices <= 1000);
+      uint64_t ticks = 100000000;
+      result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
+    } while (result == -1);
+    double ms = emscripten_get_now() - start;
+    union {float f; uint32_t bits;} value = {.bits = regs[0]};
+    assert(result == 0x42 && value.f == (kind == 2 ? 100001.0f : kind == 1 ? 0.0f : 1.0f) && regs[1] == 0);
+    const char *name[] = {"float-add-zero", "float-mul-zero", "float-add-normal", "float-mul-normal"};
+    printf("BENCH {\"kind\":\"%s\",\"trial\":%u,\"instructions\":300006,\"ms\":%.3f}\n", name[kind], trial, ms);
+    touchHLE_DynarmicWrapper_delete(cpu);
+    free(code);
+  }
   for (unsigned trial = 0; trial < 5; ++trial) {
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xed920b00; // vldr d0,[r2]

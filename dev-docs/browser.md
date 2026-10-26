@@ -1805,3 +1805,79 @@ the compiler extension for its isolated measured gain. Actual game on this
 compiler remains pending; the continuing game still uses the prior compiler.
 Live-register game has advanced to Lesson2 and accepted pinch; placement and
 second SUCCESS verification are in progress.
+
+Live-register game confirms Lesson2 SUCCESS at999 s after second Play948 s
+(`target/browser-jit-live-regs/canvas-999.png`), then Lesson3 at1060 s. The owned
+diagnostic browser was stopped through its Stop button afterward; inspector
+exit1 reflects that deliberate stop, not a guest failure. No active build was
+interrupted. The short active-play profile has13068 samples,7856 idle,922 generated
+Wasm,499 TCI interpreter/helper and367 C compiled dispatcher; no page errors
+(`target/jit-live-regs-play-profile/summary.json`).
+
+Renderer probe confirms default Chromium uses ANGLE/SwiftShader Vulkan software
+rendering. Requesting ANGLE GL fell back to the same SwiftShader renderer;
+requesting Vulkan returned no WebGL2 context. Explicit SwiftShader matches default.
+`target/browser-renderers.log` retains exact strings. No hardware GPU is exposed.
+A fresh updated-doubleword game is starting for diagnostic startup profiling;
+it will not supply a clean acceptance timing once the profiler attaches.
+
+### Exact floating-point identities experiment (2026-10-26)
+
+Updated doubleword compiler startup profile, same software-GPU Chromium:
+13535 samples: TCI interpreter2602, generated Wasm2530, soft_f32_addsub868,
+cpu_exec840, float32_mul765, single-op helper664, rounding495. No page errors.
+`target/jit-doubleword-startup-profile/{summary.json,worker.cpuprofile}` retains
+the evidence. This game run was profiled and overlaps later CPU fixture builds;
+its first Play around583 s is diagnostic, not a clean startup comparison.
+It progresses through Lesson1, pinch/tray and ball placement for Lesson2.
+
+Inspection finds QEMU already uses native float arithmetic when its sticky
+inexact flag is set and rounding is nearest-even. Exact zero operations may
+therefore remain on expensive software paths. A browser-only experiment short-
+circuits zero +/- normal and zero * normal/zero identities; denormals, infinities,
+NaNs and signed-zero pairs in addition retain their original implementation.
+Flags and rounding semantics must stay exact. No fast-math option is used.
+
+Before the production patch, a guest ARM corpus covers ADD/SUB/MUL,20 edge
+operands,112 seeded random pairs per mode, all4 ARM rounding modes, FZ, DN and
+clear/pre-existing sticky flags:49152 operations per adapter suite invocation.
+The unchanged pinned Unicorn produces result/FPSCR FNV fingerprints
+3e25bbf3/fa74602e/4a539c72 in every interpreter and forced-JIT repetition.
+`target/jit-fp-reference-{build,node}.log`. The expanded suite also checks
+1+2,1-2,1*2 explicitly. The SDK's wasm-only clang could not assemble an ARM
+fixture (`Unknown command line argument '-arm-add-build-attributes'`); explicit
+ARM encodings are instead checked by those known-result execution assertions.
+
+After the exact-identity patch, the same fingerprints and actual Node/Chromium
+CPU/fiber suites pass: `target/jit-fp-zero-{build,node,browser}.log`. Benchmark
+acceptance and full runtime/HLE verification remain pending. The benchmark
+reference archive was rebuilt with only this patch reversed, then the patch
+and current archive restored in finally before producing both fixture binaries.
+No concurrent runtime build used the temporarily reversed source.
+
+Exact-zero production patch REJECTED and removed. First new/old/new medians
+(ms): zero addition19.875/27.906/19.876; zero multiplication21.458/23.697/18.063;
+ordinary addition29.298/27.808/29.301. Reordering predicates still gives ordinary
+addition29.347/27.542/28.267, versus zero addition20.122/27.336/19.224 and zero
+multiplication17.905/23.953/17.043. The specialized gain does not establish a
+net game improvement and ordinary addition regresses. Preserve the reference
+corpus/benchmarks, not this production complexity. Logs:
+`target/jit-fp-zero-{comparison,order-comparison}.log`; owned browser pauses
+were8.949 s and the duration in `jit-fp-zero-order-comparison-pause.log`.
+
+After reverting source and patch registration, rebuilt actual Node/Chromium
+CPU/fiber suites and the expanded benchmark pass, including a normal-multiply
+control. Logs: `target/jit-fp-final-{build,node,browser,benchmark}.log`. No
+production floating-point implementation changed. Prior JS21 and runtime
+graphics remain applicable; only test/benchmark/docs changes are retained.
+
+Doubleword game Lesson2 SUCCESS verified at968 s after second Play909 s, then
+Lesson3 at1028 s (`target/browser-jit-doubleword/canvas-{968,1028}.png`). The
+owned inspector was deliberately stopped through Stop before reverting/building
+the experiment; its exit1 is the diagnostic harness's manual-stop behavior.
+Both committed optimizations therefore have actual two-lesson correctness
+evidence, but the under10 s/30 FPS and device acceptance gates remain unmet.
+Next candidate: reduce normalized-helper dispatch overhead while preserving
+GETPC and the existing helper implementations; the earlier rejected direct-
+import experiment must not be reinstated without reproducing its multi-instance
+regression and establishing a safer boundary.

@@ -172,3 +172,22 @@ Graphics matrix pending. M4/M5 remain open.
 Doubleword compiler graphics matrix passes twice with forced threshold1;
 formatting/diff pass. Retain the small extension; game performance on it remains
 pending. Existing live-register game reaches Lesson2 and accepts pinch.
+
+Live-register Lesson2 SUCCESS verified999 s, then Lesson3; owned inspector
+stopped deliberately afterward. Gameplay profile still60% idle with confirmed
+SwiftShader. Fresh doubleword-compiler game starts for startup profiling;
+performance/device acceptance remains open.
+
+Doubleword startup profile identifies software floating-point cost. Testing
+small exact-zero identities, preserving existing special cases and flags.
+Original/optimized49152-operation fingerprints match for ADD/SUB/MUL across
+rounding/FZ/DN/sticky modes; actual Node/Chromium CPU/fibers pass. Alternating
+benchmarks and full-runtime checks pending. Doubleword game reaches Lesson2
+placement; second SUCCESS pending. M4/M5 remain open.
+
+Zero-operand production optimization rejected: ordinary-addition medians
+regressed despite predicate reordering. Reverted vendor source/patch registration;
+retained49,152-operation result/FPSCR corpus and zero/normal FP benchmarks.
+Rebuilt actual Node/Chromium CPU/fibers and benchmark pass. Doubleword game
+confirms Lesson2 SUCCESS968 s, then Lesson3. Next: measured helper-dispatch
+overhead, preserving GETPC/exception and multi-instance semantics. Goal active.
