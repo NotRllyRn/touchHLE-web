@@ -2715,3 +2715,72 @@ both lessons. Logs target/jit-memset-{game,driver}.log. Stop requested through U
 after success. Retain the simple measured fill improvement, with its limited game
 effect explicit. Next focus remaining CPU dispatch/generated-code/compilation
 cost; all original game/device acceptance targets remain open.
+
+
+Dispatch-cache diagnostic after81561e72: initial Playwright page.workers lookup
+failed with Missing runtime worker because the worker predated CDP attachment.
+Retried using repository CDP target discovery;15.1515 s startup sample observed
+121486 JS lookups:105141 already compiled,15100 cold,1245 missing. Simulated
+8192/16384/32768/65536-entry direct tables could avoid0/40610/70391/86336 of those
+lookups. Simulation sees native misses only, starts empty, mirrors registration
+slot invalidation and JS clears, and modifies no guest code/results. Restored
+wrappers in finally. This is projected lookup avoidance, not measured speedup.
+Logs target/jit-dispatch-lookups{,-cdp}.log.180 s diagnostic exits normally.
+
+Candidate expands only native compiled-function dispatch table from8192 to65536
+entries (+448 KiB static storage); compiled-code/metadata limits are unchanged.
+Use a shared size constant for table/index/invalidation. Existing actual CPU
+cache rewrite/eviction/fiber regressions and measured throughput gate retention.
+Previous benchmark saved in target/dispatch-cache-small/. No performance gain
+claimed yet; source patch is an uncommitted experiment.
+
+
+Large dispatch table passes actual Node/Chromium CPU/FPSCR/cache/fiber tests;
+logs target/jit-dispatch-cache-{build,node,browser}.log. Existing microbenchmarks
+new/old/new (five trials per workload) are mixed: linked107.538/108.287/114.693 ms,
+SVC119.303/121.554/117.942, memory47.296/48.470/47.987. Third-group cancellation
+8.020 ms vs5.544/5.287 is a noisy outlier requiring follow-up. Other short-loop
+results vary; no broad gain claimed. These workloads do not create the observed
+game-sized dispatch working set. target/jit-dispatch-cache-{benchmark,comparison}.log.
+Full runtime/graphics checks underway; game measurement and focused repeat pending.
+
+Large-table full runtime and nine graphics fixtures each pass twice. Isolated
+repeat new/old/new medians: cancellation5.606/5.132/5.060 ms,
+linked108.414/108.947/108.014, memory48.467/47.498/47.733,
+SVC120.036/119.840/118.185. Earlier third-group outliers do not persist.
+Logs target/jit-dispatch-cache-{runtime-build,repeat,graphics fixture names}.log.
+Clean game run starts after all tests/benchmarks finish; no concurrent profiling.
+
+
+Large dispatch cache rejected: clean game menu153 s (prior152), training229 to
+Play397 =168 s, exactly matching smaller table. First60 s after Play:50 FPS
+samples, median3.275, range2.24–3.54 vs3.25 prior. Lesson1 SUCCESS confirmed at
+canvas-473.png under target/browser-jit-dispatch-cache/. No material game gain
+justifies extra448 KiB. Restore8192-entry source table and original patch;
+production runtime rebuild pending. Candidate was not committed. Named-block
+profiling afterward is diagnostic only, on the rejected larger-table binary;
+its timing must not be used for performance acceptance.
+
+Named-block diagnostic on rejected large-cache binary:12924 samples,9970 idle
+(~77%), CPU344, getParameter341, dispatcher194; hottest individual generated
+block56 samples. target/jit-dispatch-cache-named-blocks.log; screenshot
+ target/jit-named-blocks.png. This later training phase cannot explain CPU-bound
+startup or justify register promotion. Earlier software-raster probes remain
+relevant; do not equate idle samples with one proven cause. Game stopped via UI
+(exit1 expected); restoration build/tests running.
+
+Attempted T3 collaborative preview as an additional browser route: status reported
+unavailable, and preview_open failed: "Chrome will not start its sandbox as root,
+so T3's browser cannot run while the T3 server runs as root." No server settings
+changed. Continue documented repository Chromium workflow; no hardware GPU or
+additional device validation obtained from this attempt.
+
+Restored production8192-entry runtime and shared CPU rebuild successfully.
+Node/Chromium CPU/FPSCR/cache/fiber checks pass; actual HLE guest (including
+memset checks) passes twice. Formatting/diff checks pass. Logs
+ target/jit-dispatch-restored-{runtime-build,build,node,browser,hle}.log.
+CPU benchmark artifacts restored from saved small-table baseline. No active
+game remains. Production code remains81561e72; only negative experiment evidence
+is retained in this follow-up. Next sample named blocks during CPU-bound startup
+before applying any further compiler optimization; real-time/device goals remain
+open and opt-in JIT remains appropriate.

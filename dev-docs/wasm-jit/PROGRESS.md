@@ -380,3 +380,26 @@ training229 to Play397 =168 s vs173 s prior (below timing precision). Logged
 FPS median3.25 over first60 s; both lessons SUCCESS463/723 s, zoom/placement
 verified. Retain cheap measured HLE improvement; next investigate remaining
 CPU dispatch/generated-code/compilation cost. M4/M5 and thread goal stay open.
+
+
+81561e72 chunked fill and evidence committed/pushed. Dispatch diagnostic observes
+105141 hot/121486 total JS lookups in15 s; simulated65536-entry native table
+avoids86336 observed lookups (+448 KiB). Candidate table expansion now undergoing
+actual CPU/cache/fiber checks; throughput/game effects pending. No goal closure.
+
+
+Reject large dispatch table: game load168 s exactly matches baseline; first-minute
+FPS3.275 vs3.25. Lesson1 passes. Source restored to8192 entries, avoiding448 KiB
+extra static memory; runtime rebuild pending. Capture individual generated-block
+profile after acceptance interval to identify a more substantial bottleneck.
+
+Named-block profile again samples mostly idle later-training time (~77%), with
+only56 samples in hottest individual generated block; do not infer a CPU change
+from that phase. Next profile named blocks during CPU-bound startup/loading.
+T3 preview attempt fails root sandbox startup, so hardware/device coverage is
+unchanged. Restore production runtime/CPU artifacts and push negative results.
+
+Restoration complete: runtime/shared CPU, Node/Chromium CPU/cache/fibers, HLE guest
+twice and formatting all pass. Smaller-table production81561e72 restored,
+no game running. Save negative evidence; next named-block startup profile remains
+pending. Goal remains active, not achieved.
