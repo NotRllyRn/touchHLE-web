@@ -1231,3 +1231,60 @@ interpreter helper path (not the rejected direct calls); expanded Node suite
 passes, with medians 53.667 / 33.344, 78.273 / 32.640, 292.512 / 35.568 and
 133.647 / 129.372 (`target/jit-helper-state-{node,benchmark}.log`).
 These are CPU microbenchmarks, not a game startup/FPS result.
+
+Native startup reference: optimized native binary (reported dff1fa77, existing
+compatibility work), Intel i9-13900H, Xvfb 1280x1024, GLES1-on-GL2, null audio,
+fresh sandbox per trial. `xvfb-run -a -s '-screen 0 1280x1024x24' python3
+ target/native-startup-check.py` compares the terms-button crop against a local
+reference twice, sampling every 0.5 s. Terms detected at 60.337, 58.579, 58.548 s
+(median 58.579); screenshot/matching overhead included. This is a local software
+rendering reference, not physical-device timing. Evidence stays in
+`target/native-startup-check/` and `target/native-startup-check.log`.
+
+Native GDB samples (`target/native-profile/stack-{5,15,25,35,45}.log`) show
+Dynarmic translating at the earlier points, and guest comparator calls under
+`qsort_rec` at both later points. Inspection confirms a first-element-pivot
+quicksort with quadratic sorted/equal-input behavior and unbounded recursion.
+An in-place heapsort replacement preserves guest comparator/swap calls, avoids
+allocation, and bounds comparisons. Three new correctness/complexity tests pass
+with the existing native suite (33/33, `target/jit-qsort-native-tests.log`).
+Native optimized build succeeds (`target/jit-qsort-native-build.log`) with the
+existing stb warnings; repeat game startup measurement is in progress.
+
+Instruction-budget experiment: emit decrement/check operations in TCG instead
+of invoking the generic Unicorn block hook every block. Budget exhaustion keeps
+the existing stop/exception path; exact debugger stepping retains its hook and
+mode-switch cache flush. Mixed-width Thumb now charges one tick per instruction,
+not one per halfword. The adapter, context/cache/memory and nested-fiber suites
+pass in Node and Chromium (`target/jit-budget-{node,browser}.log`). Initial patch
+application failed due overlapping patch context and missing upstream EOF
+newlines; the final patch is independently reversible and idempotent
+(`target/jit-budget-build-fixed.log`). Initial CPU timings overlap the native
+sampling experiment and must be repeated in isolation before comparison.
+
+After heapsort, the same fresh native terms-screen trials measured 56.356,
+56.455, 56.353 s (median 56.356, ~3.8% below the 58.579 s baseline). This is a
+modest end-to-end improvement; the sampled qsort stacks did not establish its
+share of total startup. Keep the bounded algorithm for correctness/robustness
+and measured benefit, but do not attribute the whole loading problem to it.
+Logs: `target/native-startup-qsort.log`, images under the matching directory.
+
+The normal exit check now emits a TCG load/branch and calls the existing exit
+helper only when its original pending-exit predicate is true. Node CPU/context,
+cache, memory and fiber tests pass. Isolated five-trial microbenchmark medians
+(`target/jit-exit-benchmark.log`): interpreter/JIT milliseconds: tiny 42.406 /
+10.254, medium 68.415 / 9.406, long 283.050 / 12.551, 50k SVC 118.215 / 105.818.
+JIT ranges respectively 8.942–53.559, 8.876–11.521, 11.388–21.515 and
+105.426–110.396 ms; first compilation/tiering trials included. Long repeated-add
+blocks are particularly easy for the browser compiler to optimize; their
+22.6x ratio must not be generalized to game performance. Full runtime rebuild
+and game measurements are pending.
+
+Full runtime rebuild completed successfully with budget/exit checks and heapsort
+(`target/jit-exit-runtime-build.log`). Node CPU and Chromium shared CPU/fibers
+pass (`target/jit-exit-{node,browser}.log`); forced-JIT mipmap HLE fixture passes
+twice (`target/jit-exit-mipmap.log`). Five-minute game run still has no matched
+menu at 302.8 s: 55,437,560 compiled dispatches, zero compilation failures,
+6,890 cumulative compilations, 5,068.5 ms cumulative compilation time and no
+metadata resets (`target/jit-budget-game.log`). Startup acceptance remains unmet.
+A longer run with attached Profiler is collecting later loading evidence.

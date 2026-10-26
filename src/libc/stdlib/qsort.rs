@@ -53,36 +53,104 @@ pub fn qsort_generic<T, Compare, Swap>(
     if nitems < 2 {
         return;
     }
-    qsort_rec(user_data, compar, swap, 0, nitems - 1);
+    // A first-element quicksort pivot makes sorted/duplicate-heavy inputs
+    // quadratic. Guest comparator calls are expensive; bound their count and
+    // avoid recursive host-stack growth with an in-place heapsort.
+    for root in (0..nitems / 2).rev() {
+        sift_down(user_data, compar, swap, root, nitems);
+    }
+    for end in (1..nitems).rev() {
+        swap(user_data, 0, end);
+        sift_down(user_data, compar, swap, 0, end);
+    }
 }
 
-fn qsort_rec<T, Compare, Swap>(
+fn sift_down<T, Compare, Swap>(
     user_data: &mut T,
-    compar: &mut Compare, // int (*compar)(const void *, const void*))
+    compar: &mut Compare,
     swap: &mut Swap,
-    low: u32,
-    hi: u32,
+    mut root: u32,
+    end: u32,
 ) where
     Compare: FnMut(&mut T, u32, u32) -> i32,
     Swap: FnMut(&mut T, u32, u32),
 {
-    if low >= hi {
-        return;
+    // Check before doubling to avoid overflow even for very large arrays.
+    while root < end / 2 {
+        let mut child = root * 2 + 1;
+        if child + 1 < end && compar(user_data, child, child + 1) < 0 {
+            child += 1;
+        }
+        if compar(user_data, root, child) >= 0 {
+            break;
+        }
+        swap(user_data, root, child);
+        root = child;
     }
-    // TODO: use median selection
-    let pivot = low;
-    let mut separator = low + 1;
-    for i in low + 1..=hi {
-        if compar(user_data, i, pivot) < 0 {
-            swap(user_data, i, separator);
-            separator += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::qsort_generic;
+
+    fn check(values: Vec<i32>, length: usize) -> usize {
+        let mut expected = values.clone();
+        expected[..length].sort_unstable();
+        let mut state = (values, 0);
+        qsort_generic(
+            &mut state,
+            length as u32,
+            &mut |(values, comparisons), i, j| {
+                *comparisons += 1;
+                values[i as usize].cmp(&values[j as usize]) as i32
+            },
+            &mut |(values, _), i, j| values.swap(i as usize, j as usize),
+        );
+        assert_eq!(state.0, expected);
+        state.1
+    }
+
+    #[test]
+    fn edge_cases_and_subarray_boundary() {
+        assert_eq!(check(vec![], 0), 0);
+        assert_eq!(check(vec![42], 1), 0);
+        check(vec![i32::MAX, i32::MIN, 0, 99, -99], 3);
+        check(vec![2, 1], 2);
+    }
+
+    #[test]
+    fn adversarial_inputs_have_bounded_comparator_calls() {
+        let n = 4096;
+        for values in [
+            (0..n).collect(),
+            (0..n).rev().collect(),
+            vec![7; n as usize],
+            (0..n).map(|i| i % 2).collect(),
+            (0..n).map(|i| i.min(n - i)).collect(),
+        ] {
+            let comparisons = check(values, n as usize);
+            assert!(
+                comparisons < 3 * n as usize * 12,
+                "{comparisons} comparisons"
+            );
         }
     }
-    swap(user_data, pivot, separator - 1);
-    if separator > 1 {
-        qsort_rec(user_data, compar, swap, low, separator - 2);
+
+    #[test]
+    fn seeded_random_inputs_preserve_values() {
+        let mut seed = 0x12345678u32;
+        for length in 0..256 {
+            let values = (0..length)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as i32
+                })
+                .collect();
+            check(values, length);
+        }
     }
-    qsort_rec(user_data, compar, swap, separator, hi);
 }
 
 pub const FUNCTIONS: FunctionExports = &[export_c_func!(qsort(_, _, _, _))];

@@ -48,3 +48,16 @@ show ~338k translations and four metadata-limit resets during initialization;
 compiler retention/dispatch and guest-memory helpers need further work. New
 self-modifying-code/protection/unmap/cross-page tests pass in Node. Benchmarking
 batched register transfers separately from lazy VFP transfers before retaining.
+
+Compiled-dispatch cache, selective helper operands and batched register transfer
+are pushed. Instruction budget and ordinary exit checks now execute as TCG/Wasm
+operations with original exceptional paths retained. CPU/context/cache/fiber
+regressions and actual HLE mipmap fixture pass. Isolated interpreter/JIT medians
+(ms): tiny 42.406/10.254, medium 68.415/9.406, long 283.050/12.551,
+50k SVC 118.215/105.818. These are synthetic CPU results only.
+
+Heapsort bounds guest comparator calls and passes 33 native tests. Native game
+startup median improves 58.579 to 56.356 s. Browser game still loading at
+302.8 s despite 55.4 million compiled dispatches and no compilation failures.
+Next: sample later loading, optimize the measured bottleneck, then repeat clean
+game acceptance and graphics/audio regressions. M4/M5 and the goal remain open.
