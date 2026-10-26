@@ -1,6 +1,6 @@
 --- a/include/uc_priv.h
 +++ b/include/uc_priv.h
-@@ -331,6 +331,11 @@
+@@ -331,6 +331,13 @@
      RAMList ram_list;               // qemu/exec.c
      /* qemu/exec.c */
      unsigned int alloc_hint;
@@ -8,6 +8,8 @@
 +    // Opt-in immutable RWX host mapping owned by the touchHLE adapter only.
 +    uint32_t touchhle_read_base[2], touchhle_read_size[2];
 +    uint8_t *touchhle_read_pointer[2];
++    // Conservative: once translated, a 4 KiB guest page always uses MMU stores.
++    uint8_t touchhle_code_pages[1 << 17];
 +#endif
      /* qemu/exec-vary.c */
      TargetPageBits *init_target_page;
@@ -21,7 +23,7 @@
 +
 +#ifdef __EMSCRIPTEN__
 +// Caller guarantees immutable mapping/permissions, identity ARM addresses,
-+// and no valid-memory read hooks for this engine's entire lifetime.
++// no physical aliases, and no valid-memory hooks for the engine lifetime.
 +UNICORN_EXPORT void touchHLE_uc_read_region(uc_engine *uc, uint32_t base,
 +                                           uint32_t size, void *pointer)
 +{
@@ -47,8 +49,8 @@
              case MO_LEUL:
 +#ifdef __EMSCRIPTEN__
 +                // Only naturally aligned reads wholly inside an opted-in,
-+                // immutable adapter mapping bypass the soft MMU. Stores keep
-+                // Unicorn's full invalidation/dirty-page path.
++                // immutable adapter mapping bypass the soft MMU. Code pages keep
++                // Unicorn's full invalidation/dirty-page store path.
 +                if (!(taddr & 3) && get_alignment_bits(get_memop(oi)) <= 2 &&
 +                    env->uc->touchhle_read_size[taddr >> 31] >= 4 &&
 +                    taddr >= env->uc->touchhle_read_base[taddr >> 31] &&
@@ -61,3 +63,37 @@
                  tmp32 = qemu_ld_leul;
                  break;
              case MO_BEUW:
+@@ -1257,6 +1270,17 @@
+                 qemu_st_lew(t0);
+                 break;
+             case MO_LEUL:
++#ifdef __EMSCRIPTEN__
++                if (!(taddr & 3) && get_alignment_bits(get_memop(oi)) <= 2 &&
++                    env->uc->touchhle_read_size[taddr >> 31] >= 4 &&
++                    taddr >= env->uc->touchhle_read_base[taddr >> 31] &&
++                    taddr - env->uc->touchhle_read_base[taddr >> 31] <= env->uc->touchhle_read_size[taddr >> 31] - 4 &&
++                    !(env->uc->touchhle_code_pages[taddr >> 15] & (1 << ((taddr >> 12) & 7)))) {
++                    stl_le_p(env->uc->touchhle_read_pointer[taddr >> 31] +
++                             (taddr - env->uc->touchhle_read_base[taddr >> 31]), t0);
++                    break;
++                }
++#endif
+                 qemu_st_lel(t0);
+                 break;
+             case MO_BEUW:
+--- a/qemu/accel/tcg/translator.c
++++ b/qemu/accel/tcg/translator.c
+@@ -168,6 +168,13 @@
+     }
+ 
+ _end_loop:
++#ifdef __EMSCRIPTEN__
++    if (uc->touchhle_read_size[0] || uc->touchhle_read_size[1]) {
++        uint64_t end = (uint64_t)db->pc_first + (db->pc_next - db->pc_first);
++        for (uint64_t page = db->pc_first >> 12; page < (1 << 20) && page * 4096 < end; ++page)
++            uc->touchhle_code_pages[page >> 3] |= 1 << (page & 7);
++    }
++#endif
+     /* Emit code to exit the TB, as indicated by db->is_jmp.  */
+     ops->tb_stop(db, cpu);
+     gen_tb_end(tcg_ctx, db->tb, db->num_insns - bp_insn);

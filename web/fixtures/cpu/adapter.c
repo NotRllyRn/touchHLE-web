@@ -16,12 +16,13 @@ extern void touchHLE_DynarmicWrapper_invalidate_cache_range(Cpu *, uint32_t, uin
 extern int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *, void *, uint64_t *);
 extern void touchHLE_web_map(Cpu *, uint32_t, size_t, void *);
 void touchHLE_web_map_memory(void *mem, Cpu *cpu) {
-  touchHLE_web_map(cpu, 0x1000, 4096, mem);
-  static uint32_t high_memory[1024] = {[0] = 0x11223344, [1022] = 0x44332211, [1023] = 0x88776655};
+  touchHLE_web_map(cpu, 0x1000, 8192, mem);
+  uint32_t *high_memory = (uint32_t *)mem + 2048;
+  high_memory[0] = 0x11223344; high_memory[1022] = 0x44332211; high_memory[1023] = 0x88776655;
   touchHLE_web_map(cpu, 0xfffff000, 4096, high_memory);
 }
 void adapter_checks(void) {
-  uint32_t *code = calloc(1, 4096);
+  uint32_t *code = calloc(1, 12288);
   assert(code);
   Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
   uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
@@ -104,10 +105,10 @@ void adapter_checks(void) {
   assert(regs[0] == 0x3f800000);
   // Fast aligned reads, unaligned fallback, and both mapping boundaries.
   code[0] = 0xe5910000; code[1] = 0xef000042; // ldr r0,[r1]; svc
-  code[1022] = 0x44332211; code[1023] = 0x88776655;
+  code[2046] = 0x44332211; code[2047] = 0x88776655;
   touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
   touchHLE_DynarmicWrapper_set_cpsr(cpu, 0x10);
-  const uint32_t addresses[] = {0x1000, 0x1ffc, 0x1ff9, 0xfffff000, 0xfffffffc, 0xfffffff9};
+  const uint32_t addresses[] = {0x1000, 0x2ffc, 0x2ff9, 0xfffff000, 0xfffffffc, 0xfffffff9};
   const uint32_t expected[] = {0xe5910000, 0x88776655, 0x55443322, 0x11223344, 0x88776655, 0x55443322};
   for (unsigned pass = 0; pass < 2; ++pass) {
     if (pass) assert(emscripten_resize_heap(emscripten_get_heap_size() + 64 * 1024 * 1024));
@@ -119,11 +120,76 @@ void adapter_checks(void) {
       }
     }
   }
-  const uint32_t invalid[] = {0, 0x2000, 0x1ffd};
+  const uint32_t invalid[] = {0, 0x3000, 0x2ffd};
   for (unsigned i = 0; i < 3; ++i) {
     regs[1] = invalid[i]; regs[15] = 0x1000; ticks = 100;
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
     assert(regs[15] == 0x1000);
+  }
+  // A hot store starts on a data page. Translating that page must immediately
+  // force the same compiled store through Unicorn's code invalidation path.
+  code[0] = 0xe5810000; code[1] = 0xef000042; // str r0,[r1]; svc
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  for (unsigned i = 0; i < 64; ++i) {
+    regs[0] = i; regs[1] = 0x2000; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(code[1024] == i);
+  }
+  code[1024] = 0xe3a00001; code[1025] = 0xef000043; // mov r0,#1; svc
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x2000, 4096);
+  for (unsigned i = 0; i < 64; ++i) {
+    regs[15] = 0x2000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+    assert(regs[0] == 1);
+  }
+  regs[0] = 0xe3a0002a; regs[1] = 0x2000; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  regs[15] = 0x2000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+  assert(regs[0] == 42);
+  for (unsigned i = 0; i < 3; ++i) {
+    regs[1] = invalid[i]; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
+    assert(regs[15] == 0x1000);
+  }
+  regs[0] = 0x76543210; regs[1] = 0xfffffffc; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  code[0] = 0xe5910000; // ldr r0,[r1]
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x76543210);
+  // Subword JIT reads: unsigned/signed, endpoint and unaligned fallback.
+  code[2047] = 0x88776655;
+  const uint32_t loads[] = {0xe5d10000, 0xe1d100d0, 0xe1d100b0, 0xe1d100f0, 0xe1d100b0};
+  const uint32_t load_addresses[] = {0x2fff, 0x2fff, 0x2ffe, 0x2ffe, 0x2ffd};
+  const uint32_t load_values[] = {0x88, 0xffffff88, 0x8877, 0xffff8877, 0x7766};
+  for (unsigned i = 0; i < 5; ++i) {
+    code[0] = loads[i];
+    touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+    for (unsigned hot = 0; hot < 64; ++hot) {
+      regs[1] = load_addresses[i]; regs[15] = 0x1000; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+      assert(regs[0] == load_values[i]);
+    }
+  }
+  for (unsigned half = 0; half < 2; ++half) {
+    code[0] = half ? 0xe1c100b0 : 0xe5c10000; // strh/strb r0,[r1]
+    touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+    regs[0] = half ? 0x8001 : 0xfe; regs[1] = half ? 0xfffffffe : 0xffffffff;
+    regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    // Reuse the same compiled subword store on an already translated page.
+    regs[0] = half ? 44 : 43; regs[1] = 0x2000; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    regs[15] = 0x2000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+    assert(regs[0] == (half ? 44 : 43));
+    code[0] = half ? 0xe1d100f0 : 0xe1d100d0; // signed endpoint read
+    touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+    regs[1] = half ? 0xfffffffe : 0xffffffff; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(regs[0] == (half ? 0xffff8001 : 0xfffffffe));
   }
   touchHLE_DynarmicWrapper_delete(cpu);
   free(code);

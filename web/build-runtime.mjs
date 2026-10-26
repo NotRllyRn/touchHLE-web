@@ -28,11 +28,11 @@ if (process.env.TOUCHHLE_WEB_DEBUG === '1') {
 execFileSync('cargo', ['rustc', '--no-default-features', '--target', 'wasm32-unknown-emscripten',
   '--release', '--lib', '--crate-type', 'staticlib'], { cwd: root, env, stdio: 'inherit' });
 execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
-  '--js-library', 'web/emscripten-gl.js', ...diagnostics,
+  '--js-library', 'web/emscripten-gl.js', '--js-library', 'web/emscripten-scheduler.js', ...diagnostics,
   '--post-js', 'web/emscripten-gl-init.js',
   '--no-entry', '-O2', '-g2', '-sSTACK_OVERFLOW_CHECK=2', '-sASYNCIFY=1', '-sASYNCIFY_STACK_SIZE=2097152',
   '-sSUPPORT_LONGJMP=wasm',
-  '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
+  '-sALLOW_TABLE_GROWTH=1',
   '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
   // CPU hooks only count, stop, or report faults. They never suspend; Rust
   // dispatches HLE calls after the interpreter returns. Keep fibers instrumented.
@@ -50,4 +50,4 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
 
 await copyFile(`${root}web/runtime-worker.js`, `${root}web/dist/runtime-worker.js`);
 
-for (const name of ['audio-proxy.js', 'audio.mjs']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);
+for (const name of ['audio-proxy.js', 'audio.mjs', 'tci-jit.js']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);

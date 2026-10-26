@@ -88,3 +88,10 @@ compiled aligned little-endian32-bit loads check size/bounds at runtime, preserv
 memory growth and per-engine identity. Any unsupported access uses the original
 helper, and all stores retain the full invalidation path. New mapping/protection/
 valid-memory-hook APIs would require disabling or revisiting this contract.
+
+Implemented memory coverage includes signed/unsigned 8/16-bit and 32-bit
+little-endian reads and 8/16/32-bit stores. Stores dynamically recheck translated
+page marks, including pages that became code after the store block compiled.
+Cache-capacity evictions are reported separately from explicit resets. Scheduler
+regressions verify local Asyncify state across repeated yields, worker message
+handling and positive-duration sleep. Full-game acceptance remains outstanding.

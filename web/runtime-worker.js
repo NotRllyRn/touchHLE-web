@@ -36,6 +36,7 @@ self.onmessage = async ({ data }) => {
         self.postMessage({ type: 'exit', code });
       },
     });
+    if (data.cpuBackend === 'jit') importScripts('./tci-jit.js');
     if (data.cpuBackend === 'jit') setInterval(() => {
       if (runtime.tciJit) self.postMessage({ type: 'log', message: `CPU JIT ${JSON.stringify(runtime.tciJit.stats)}` });
     }, 10000);

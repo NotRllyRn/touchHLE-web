@@ -1450,3 +1450,69 @@ inline75.633 ms; ranges77.805–107.013,81.890–83.377,74.771–76.383. SVC med
 or improvement. Log `target/jit-inline-stack-comparison.log`; pause logs share
 that prefix. Retain the bounded inline path for its measured modest memory benefit;
 do not extrapolate to game speed. Standard builds remain opt-in JIT.
+
+### Data stores and cooperative CPU yields (2026-10-26)
+
+Extended the opted-in fixed mapping path to naturally aligned little-endian
+8/16/32-bit Wasm reads/writes (including signed byte/halfword reads). C TCI has
+32-bit fast reads/stores. A per-engine 128 KiB bitmap marks every translated
+4 KiB page permanently. Stores to any marked page retain Unicorn invalidation;
+all unaligned, out-of-region and unsupported accesses retain helpers. The adapter
+contract excludes physical aliases, mutable mappings/permissions and valid-memory
+hooks; generic Unicorn engines do not opt in. Actual ARM tests cover a data page
+becoming executable and subsequent word/halfword/byte writes from already compiled
+stores, alongside endpoint reads/faults, separate engines and memory growth.
+The original store test polluted a shared static high-memory fixture and failed
+an assertion (`target/jit-store-fault-node.log`); each CPU now owns its high-memory
+allocation. Final checks below pass. No failure is being discarded.
+
+Gameplay profiling of the prior run found 44% idle samples. Replace only the
+scheduler's zero-delay CPU yield with an Asyncify MessageChannel callback;
+positive-duration sleeps are unchanged. Node retains timer fallback. The compiled
+scheduler harness checks preserved local state, input pings and positive sleep.
+Its initial Blob worker was blocked by CSP (`target/jit-scheduler-check.log`);
+use a generated same-origin worker. Fixed harness
+(`target/jit-scheduler-check-fixed.log`): 200 timer yields 834.4/830.3/815.0 ms;
+2000 channel yields 93.0/57.9/114.1 ms; requested 20 ms sleep 20.4 ms. These are
+scheduler measurements, not game speed. CPU slices remain 100,000 instructions.
+
+Raise compiled-module cap 4096 to 8192, retaining the 16 MiB emitted-code cap
+and 65,536 translation metadata cap. Add capacity eviction counter: the previous
+long game compiled 151k blocks/275 MB cumulatively and spent ~106 s compiling.
+The new cap's game effect is pending. Load compiler JS separately in JIT workers
+after runtime initialization and before guest execution, permitting compiler-only
+iterations without relinking Rust/LLVM. CPU fixtures remain self-contained.
+
+Rejected experiment: cache fixed-region metadata in extra block locals. Correctness
+passed but separate-data median 32.124 to 32.251 ms and same-code-page median
+77.015 to 77.449 ms did not improve; reverted before final validation.
+
+Final validation (Node 22.22.3, Chromium 141.0.7390.37, Linux x86_64):
+- Shared CPU Node and Chromium/fibers pass; JS 17 tests pass
+  (`target/jit-subword-final-{build,node,browser,js}.log`).
+- Forced-JIT HLE MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG,
+  MAPPED, POINT_PARAMETERS, PRESENT_BUFFERS each pass twice
+  (`target/jit-scheduler-TEST_*.log`); actual Web Audio passes
+  (`target/jit-scheduler-audio.log`).
+- Browser Rust 9/native 33 tests pass (`target/jit-memory-scheduler-{rust-browser,native}.log`);
+  cargo fmt --all --check and git diff --check pass. All seven Unicorn patches
+  reverse/reapply byte-identically across 12 files in a temporary copy; existing
+  budget-patch EOF blank-line warning remains.
+- Isolated five-trial Asyncify CPU medians, interpreter/JIT ms
+  (`CPU_ASYNCIFY=1 node web/bench-cpu.mjs`, `target/jit-subword-final-benchmark.log`):
+  tiny 65.521/10.265, medium 92.254/9.601, long 303.099/13.116,
+  code-page memory 143.622/78.774, separate-data memory 103.277/31.968,
+  50k SVC 237.808/186.907. i9-13900H; no concurrent game/build. Trivial long
+  arithmetic favors optimization and is not representative game evidence.
+
+Prior single-region-read game diagnostic (`target/jit-fast-read-game.log`) reached
+first Play at 2455 s and completed the first simulation, then verified Lesson2
+ball placement. Second Play at 3592 s preceded timeout at 3604 s, so Lesson2
+SUCCESS is unverified. Reported gameplay ~0.5–1.5 FPS, later static Lesson2 ~2–3
+FPS. Profiling, builds and two benchmark suspensions contaminated wall-clock
+timing; these are diagnostic observations only. Under-10-second startup and
+real-time gameplay remain unmet. A fresh scheduler/store/cache run is underway
+without simultaneous builds/benchmarks (`target/jit-scheduler-game.log`). Physical
+phones/tablets and other browser engines remain untested. Next: validate both
+training successes and measure startup, frame rate and simulation pace, then
+profile the remaining bottleneck separately from timing runs.

@@ -12,11 +12,11 @@ extern uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *);
 extern int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *, void *, uint64_t *);
 extern void touchHLE_web_map(Cpu *, uint32_t, size_t, void *);
 void touchHLE_web_map_memory(void *mem, Cpu *cpu) {
-  touchHLE_web_map(cpu, 0x1000, 4096, mem);
+  touchHLE_web_map(cpu, 0x1000, 8192, mem);
 }
 int main(void) {
   for (unsigned length = 1; length <= 64; length *= 8) {
-    uint32_t *code = calloc(1, 4096);
+    uint32_t *code = calloc(1, 8192);
     for (unsigned i = 0; i < length; ++i) code[i] = 0xe2800001; // add r0,#1
     code[length] = 0xe2511001; // subs r1,#1
     code[length + 1] = 0x1a000000 | ((-(int32_t)(length + 3)) & 0xffffff); // bne start
@@ -41,9 +41,10 @@ int main(void) {
     }
     free(code);
   }
-  // Read/modify/write guest memory through the real MMU/helper path.
+  // Compare data sharing a translated page against a separate data page.
+  for (unsigned data_page = 0; data_page < 2; ++data_page)
   for (unsigned trial = 0; trial < 5; ++trial) {
-    uint32_t *code = calloc(1, 4096);
+    uint32_t *code = calloc(1, 8192);
     code[0] = 0xe5920000; // ldr r0,[r2]
     code[1] = 0xe2800001; // add r0,#1
     code[2] = 0xe5820000; // str r0,[r2]
@@ -52,7 +53,7 @@ int main(void) {
     code[5] = 0xef000042;
     Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
     uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
-    regs[1] = 100000; regs[2] = 0x1800; regs[15] = 0x1000;
+    regs[1] = 100000; regs[2] = data_page ? 0x2800 : 0x1800; regs[15] = 0x1000;
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -62,13 +63,14 @@ int main(void) {
       result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
     } while (result == -1);
     double ms = emscripten_get_now() - start;
-    assert(result == 0x42 && regs[0] == 100000 && code[512] == 100000);
-    printf("BENCH {\"kind\":\"memory\",\"trial\":%u,\"instructions\":500001,\"ms\":%.3f}\n", trial, ms);
+    assert(result == 0x42 && regs[0] == 100000 && code[data_page ? 1536 : 512] == 100000);
+    printf("BENCH {\"kind\":\"%s\",\"trial\":%u,\"instructions\":500001,\"ms\":%.3f}\n",
+           data_page ? "data-memory" : "memory", trial, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
   for (unsigned trial = 0; trial < 5; ++trial) {
-    uint32_t *code = calloc(1, 4096);
+    uint32_t *code = calloc(1, 8192);
     code[0] = 0xe2800001; code[1] = 0xef000042; code[2] = 0xeafffffc;
     Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
     uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);

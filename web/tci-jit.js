@@ -38,7 +38,7 @@
       this.blocks = new Map();
       this.liveBytes = 0;
       this.liveModules = 0;
-      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, registered: 0, liveBytes: 0 };
+      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, evictions: 0, registered: 0, liveBytes: 0 };
       if (dispatch) Object.defineProperty(this.stats, 'hits', {
         get: () => new DataView(this.memory.buffer).getFloat64(dispatch.counter, true),
       });
@@ -69,7 +69,8 @@
       try {
         const bytes = this.compile(ptr, block.size);
         if (bytes.length > 262144) throw new Error('Compiled block exceeds 256 KiB');
-        if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 4096) {
+        if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 8192) {
+          this.stats.evictions++;
           this.dispatch?.clear();
           // Retain translation identities so an evicted hot block can recompile.
           for (const entry of this.blocks.values()) {
@@ -204,25 +205,37 @@
           const address = (pc + 5) & ~3;
           save(); constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a, 0x0f);
           cursor = pc + size;
-        } else if (name === 'qemu_ld_i32' && this.dispatch?.readLayout) {
-          const dst = byte(), address = byte(), oi = word(), memop = oi >>> 4;
-          const alignment = (memop >>> 4) & 7;
-          // Pinned TCGMemOpIdx: low 4 bits are the MMU index; MO_LEUL=2.
+        } else if (['qemu_ld_i32', 'qemu_st_i32'].includes(name) && this.dispatch?.readLayout) {
+          const store = name === 'qemu_st_i32';
+          const value = byte(), address = byte(), oi = word(), memop = oi >>> 4;
+          const alignment = (memop >>> 4) & 7, width = memop & 3, bytes = 1 << width;
+          const inputs = store ? [value, address] : [address], outputs = store ? [] : [value];
+          // Pinned TCGMemOpIdx: low 4 bits are the MMU index; width is log2(size).
           // Alignment 7 means natural alignment (or unaligned on strict hosts).
-          if ((memop & 15) === 2 && (alignment <= 2 || alignment === 7)) {
-            const [engine, base, size, pointer] = this.dispatch.readLayout;
+          if (!(memop & 8) && width < 3 && (store || width < 2 || !(memop & 4)) &&
+              (alignment <= width || alignment === 7) &&
+              (!store || this.dispatch.readLayout.length >= 5)) {
+            const [engine, base, size, pointer, codePages] = this.dispatch.readLayout;
             get(0); emit(0x28, 2, ...uleb(engine));
             reg(address); constant(31); emit(0x76); constant(2); emit(0x74, 0x6a); set(21);
             reg(address); get(21); emit(0x28, 2, ...uleb(base), 0x6b); set(22);
-            reg(address); constant(3); emit(0x71, 0x45);
-            get(21); emit(0x28, 2, ...uleb(size)); constant(4); emit(0x4f, 0x71);
-            get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(4); emit(0x6b, 0x4d, 0x71);
-            emit(0x04, 0x7f); // if (aligned && size >= 4 && offset <= size - 4) -> i32
-            get(21); emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a, 0x28, 0, 0);
-            emit(0x05);
-            helper(pc, [address], [dst]); reg(dst);
-            emit(0x0b); put(dst);
-          } else helper(pc, [address], [dst]);
+            reg(address); constant(bytes - 1); emit(0x71, 0x45);
+            get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x4f, 0x71);
+            get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x6b, 0x4d, 0x71);
+            if (store) {
+              get(0); emit(0x28, 2, ...uleb(engine));
+              reg(address); constant(15); emit(0x76, 0x6a, 0x2d, 0, ...uleb(codePages));
+              constant(1); reg(address); constant(12); emit(0x76); constant(7); emit(0x71, 0x74, 0x71, 0x45, 0x71);
+            }
+            emit(0x04, store ? 0x40 : 0x7f);
+            get(21); emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a);
+            if (store) { reg(value); emit([0x3a, 0x3b, 0x36][width], 0, 0); }
+            else emit([memop & 4 ? 0x2c : 0x2d, memop & 4 ? 0x2e : 0x2f, 0x28][width], 0, 0);
+            emit(0x05); helper(pc, inputs, outputs);
+            if (!store) reg(value);
+            emit(0x0b);
+            if (!store) put(value);
+          } else helper(pc, inputs, outputs);
         } else if (name === 'mb') {
           // Worker memory is unshared; TCI's fence has no additional effect.
         } else {

@@ -86,3 +86,17 @@ pass. Same-Wasm memory A/B/A medians79.113/81.952/75.633 ms show a modest benefi
 Long diagnostic game has reached Training selection, but first level is still
 loading. CPU benchmarks temporarily suspended that diagnostic browser; its wall
 clock is explicitly not release timing evidence. Startup/real-time targets unmet.
+
+Bounded subword memory and data stores now preserve code-page invalidation via
+per-engine translated-page bitmap. Final Node/Chromium CPU/fibers, 17 JS tests,
+nine graphics fixtures twice and audio pass. Native33/browser Rust9 pass.
+Separate-data synthetic median103.277/31.968 ms interpreter/JIT; this is not
+full-game performance. Rejected metadata-local caching for lack of measured gain.
+
+MessageChannel CPU yields remove measured ~4 ms nested-timer clamping while
+preserving Asyncify state and input processing. Positive sleeps remain unchanged.
+Compiler loads separately; module cap8192 plus eviction accounting addresses
+observed churn, with emitted-code cap still16 MiB. Fresh game validation underway.
+Prior diagnostic run completed first simulation and Lesson2 placement, but not
+Lesson2 SUCCESS; only0.5–3 FPS. M3/M4/M5 and the goal remain open. Exact tests,
+failures, measurements and next steps are recorded in ../browser.md.

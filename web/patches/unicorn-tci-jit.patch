@@ -36,7 +36,7 @@
 +            wasmTable.get(step), addFunction, removeFunction,
 +            Module['tciJitThreshold'] ?? 32,
 +            {counter, clear: wasmExports['touchhle_tci_clear_dispatch'],
-+             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 4))});
++             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 5))});
 +    }
 +    return !!Module['tciJit'];
 +});
@@ -108,7 +108,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1286,7 +1321,61 @@
+@@ -1297,7 +1332,62 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -141,7 +141,8 @@
 +    if (!configured) {
 +        static const uint32_t read_layout[] = {
 +            offsetof(CPUArchState, uc), offsetof(struct uc_struct, touchhle_read_base),
-+            offsetof(struct uc_struct, touchhle_read_size), offsetof(struct uc_struct, touchhle_read_pointer)
++            offsetof(struct uc_struct, touchhle_read_size), offsetof(struct uc_struct, touchhle_read_pointer),
++            offsetof(struct uc_struct, touchhle_code_pages)
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
 +            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout);

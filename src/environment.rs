@@ -1343,9 +1343,9 @@ impl Environment {
             #[cfg(target_os = "emscripten")]
             unsafe {
                 extern "C" {
-                    fn emscripten_sleep(ms: u32);
+                    fn touchhle_web_yield();
                 }
-                emscripten_sleep(0);
+                touchhle_web_yield();
             }
             if self.threads[self.current_thread].state == ThreadState::Stepping {
                 self.remaining_ticks = None;
