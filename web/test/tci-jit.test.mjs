@@ -103,25 +103,53 @@ test('malformed code rejects compilation; registration and reset release cached 
   jit.register(0,1); assert.equal(jit.lookup(0),0); assert.equal(jit.stats.failed,1);
 });
 
-test('compiled-cache eviction clears native dispatch before table slots are reused', () => {
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const events = [];
+test('partial eviction clears dispatch before reuse and retains recently looked-up blocks', () => {
+  const memory = new WebAssembly.Memory({ initial: 1 }), events=[];
+  let next=1;
   const jit = new globalThis.TouchHLETciJit(memory, () => 0,
-    () => { events.push('add'); return 7; }, () => events.push('remove'), 1,
-    { counter: 512, clear: () => events.push('clear') });
-  jit.names = names;
-  new Uint8Array(memory.buffer).set(exit(), 1024);
-  new Uint8Array(memory.buffer).set(exit(), 2048);
-  jit.register(1024, 10); assert.equal(jit.lookup(1024), 7);
-  new DataView(memory.buffer).setFloat64(512, 123, true);
-  assert.equal(jit.stats.hits, 123);
-  jit.liveModules = 8192; // Force the production retention limit.
-  jit.register(2048, 10); assert.equal(jit.lookup(2048), 7);
-  assert.deepEqual(events, ['add', 'clear', 'remove', 'add']);
-  assert.equal(jit.blocks.get(1024).fn, 0);
-  assert.equal(jit.lookup(1024), 7); // Eviction retains enough metadata to recompile.
-  jit.reset();
-  assert.equal(events.at(-3), 'clear');
+    () => {events.push('add');return next++;}, () => events.push('remove'), 1,
+    {counter:512,clear:()=>events.push('clear')});
+  jit.names=names;
+  new Uint8Array(memory.buffer).set(exit(),1024);
+  new Uint8Array(memory.buffer).set(exit(),2048);
+  jit.register(1024,10);const hot=jit.lookup(1024);
+  // Fill the real retention limit without compiling thousands of redundant fixtures.
+  for(let i=1;i<8192;i++) {
+    const ptr=10000+i*16,block={size:10,count:1,fn:next++,bytes:128,failed:false};
+    jit.blocks.set(ptr,block);jit.compiled.set(ptr,block);jit.liveBytes+=128;jit.liveModules++;
+  }
+  jit.stats.liveBytes=jit.liveBytes;
+  new DataView(memory.buffer).setFloat64(512,123,true);assert.equal(jit.stats.hits,123);
+  assert.equal(jit.lookup(1024),hot); // Refresh an old module's recency.
+  const before=events.length;
+  jit.register(2048,10);assert.ok(jit.lookup(2048));
+  assert.equal(events[before],'clear');assert.equal(events[before+1],'remove');assert.equal(events.at(-1),'add');
+  assert.equal(events.slice(before).filter(x=>x==='remove').length,2049);
+  assert.equal(jit.liveModules,6144);assert.equal(jit.compiled.size,6144);
+  assert.equal(jit.lookup(1024),hot);assert.equal(jit.blocks.get(10016).fn,0);
+  assert.equal(jit.liveBytes,[...jit.compiled.values()].reduce((sum,b)=>sum+b.bytes,0));
+  // Eviction retains metadata; re-registration removes retained modules exactly once.
+  new Uint8Array(memory.buffer).set(exit(),10016);assert.ok(jit.lookup(10016));
+  jit.register(1024,10);assert.ok(!jit.compiled.has(1024));assert.notEqual(jit.lookup(1024),hot);
+  jit.reset();assert.equal(jit.compiled.size,0);assert.equal(jit.liveModules,0);assert.equal(jit.liveBytes,0);
+});
+
+test('byte-limited eviction retains accurate state when a new table entry fails', () => {
+  const memory=new WebAssembly.Memory({initial:1}),events=[];
+  const jit=new globalThis.TouchHLETciJit(memory,()=>0,()=>{throw Error('Table full');},()=>events.push('remove'),1,
+    {counter:512,clear:()=>events.push('clear')});
+  jit.names=names;new Uint8Array(memory.buffer).set(exit(),1024);
+  for(let i=0;i<64;i++) {
+    const block={size:10,count:1,fn:i+1,bytes:262144,failed:false};
+    jit.blocks.set(10000+i*16,block);jit.compiled.set(10000+i*16,block);
+  }
+  jit.liveModules=64;jit.liveBytes=jit.stats.liveBytes=16*1024*1024;
+  jit.register(1024,10);assert.equal(jit.lookup(1024),0);
+  assert.equal(events[0],'clear');assert.equal(events.length,18);
+  assert.equal(jit.liveModules,47);assert.equal(jit.compiled.size,47);
+  assert.equal(jit.liveBytes,47*262144);assert.equal(jit.stats.liveBytes,jit.liveBytes);
+  assert.equal(jit.stats.failed,1);assert.equal(jit.blocks.get(1024).fn,0);
+  jit.reset();assert.equal(jit.liveBytes,0);
 });
 
 test('normalized call bridge preserves operand order, wide results and exceptions', () => {

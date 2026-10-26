@@ -143,3 +143,10 @@ Page-crossing reads and stores retain helpers, even when both pages are mapped;
 their host allocations may be unrelated. Regressions include byte/halfword/word/
 doubleword accesses, high addresses, memory growth, changing engines, unmapped
 pages and a crossing store that rewrites translated code on its second page.
+
+Partial cache eviction must preserve valid retained functions, clear native
+pointers before recycling table slots, and retain evicted translation identities.
+Tests exercise both byte and module limits, failed function-table insertion,
+re-registration and reset. Actual ARM capacity testing compiles more than8192
+modules, revisits code, checks results and rewrites a prior block through a guest
+store. The synthetic cache-pressure benchmark is distinct from game acceptance.

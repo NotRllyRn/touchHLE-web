@@ -2,6 +2,8 @@
 // Exercise cache lifetime through actual guest stores and memory-map changes.
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <emscripten.h>
 #include <unicorn/unicorn.h>
 static void reg(uc_engine *cpu, int id, uint32_t value) {
   assert(uc_reg_write(cpu, id, &value) == UC_ERR_OK);
@@ -100,6 +102,39 @@ void cache_checks(void) {
   reg(cpu, UC_ARM_REG_R0, 0xe3a0002a); reg(cpu, UC_ARM_REG_R1, 0x2000);
   reg(cpu, UC_ARM_REG_R2, 2);
   assert(uc_emu_start(cpu, 0x2000, 0x200c, 0, 0) == UC_ERR_OK);
+  assert(r0(cpu) == 42);
+  assert(uc_close(cpu) == UC_ERR_OK);
+  // Exercise production module-capacity eviction through the native dispatcher.
+  assert(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &cpu) == UC_ERR_OK);
+  const uint32_t base = 0x1000000, count = 9000;
+  assert(uc_mem_map(cpu, base, 0x20000, UC_PROT_ALL) == UC_ERR_OK);
+  uint32_t *pressure = malloc(count * 8); assert(pressure);
+  for (uint32_t i = 0; i < count; ++i) {
+    pressure[i*2] = 0xe3a00000 | (i & 255); // mov r0,#low
+    pressure[i*2+1] = 0xe3800c00 | (i >> 8); // orr r0,r0,#high<<8
+  }
+  assert(uc_mem_write(cpu, base, pressure, count * 8) == UC_ERR_OK);
+  free(pressure);
+  unsigned evictions = EM_ASM_INT({ var j = Module['tciJit']; return j ? j.stats.evictions : 0; });
+  for (uint32_t i = 0; i < count; ++i) {
+    assert(uc_emu_start(cpu, base+i*8, base+i*8+8, 0, 0) == UC_ERR_OK);
+    assert(r0(cpu) == i);
+    if (!(i & 63)) for (uint32_t hot = 0; hot < 32; ++hot) {
+      assert(uc_emu_start(cpu, base+hot*8, base+hot*8+8, 0, 0) == UC_ERR_OK);
+      assert(r0(cpu) == hot);
+    }
+  }
+  assert(EM_ASM_INT({ var j = Module['tciJit']; return !j || j.threshold !== 1 || j.stats.evictions > $0; }, evictions));
+  // Reuse old translations, then overwrite an old block through a guest store.
+  for (uint32_t i = 0; i < count; i += 257) {
+    assert(uc_emu_start(cpu, base+i*8, base+i*8+8, 0, 0) == UC_ERR_OK);
+    assert(r0(cpu) == i);
+  }
+  instruction = 0xe5821000;
+  assert(uc_mem_write(cpu, base+0x1f000, &instruction, 4) == UC_ERR_OK);
+  reg(cpu, UC_ARM_REG_R1, 0xe3a0002a); reg(cpu, UC_ARM_REG_R2, base);
+  assert(uc_emu_start(cpu, base+0x1f000, base+0x1f004, 0, 0) == UC_ERR_OK);
+  assert(uc_emu_start(cpu, base, base+8, 0, 0) == UC_ERR_OK);
   assert(r0(cpu) == 42);
   assert(uc_close(cpu) == UC_ERR_OK);
 }

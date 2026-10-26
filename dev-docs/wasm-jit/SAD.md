@@ -121,3 +121,12 @@ that page. Stores retain the translated-page bitmap gate. All other accesses
 use the original helpers. Older runtime metadata retains the two-region path;
 no guest mappings are enlarged or coalesced. The extra table cost applies to
 each browser engine and is absent from native builds.
+
+## Bounded compiler retention
+
+Capacity eviction clears native dispatch first, then removes older compiled
+functions until the new module fits within75% of the unchanged8192-module/
+16 MiB limits. Translation identities remain for recompilation. A bounded map
+tracks compiled modules; JS lookups refresh recency, while native dispatch hits
+bypass that bookkeeping. This is approximate recency, not a strict LRU policy.
+Reset and re-registration remove retained entries and account for emitted bytes.

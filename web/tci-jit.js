@@ -36,6 +36,7 @@
       this.threshold = threshold;
       this.names = [];
       this.blocks = new Map();
+      this.compiled = new Map();
       this.liveBytes = 0;
       this.liveModules = 0;
       this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, evictions: 0, registered: 0, liveBytes: 0 };
@@ -47,12 +48,14 @@
       this.dispatch?.clear();
       for (const block of this.blocks.values()) if (block.fn) this.removeFunction(block.fn);
       this.blocks.clear();
+      this.compiled.clear();
       this.liveBytes = this.stats.liveBytes = 0;
       this.liveModules = 0;
       this.stats.resets++;
     }
     register(ptr, size) {
       const old = this.blocks.get(ptr);
+      this.compiled.delete(ptr);
       if (old?.fn) { this.removeFunction(old.fn); this.liveBytes -= old.bytes; this.liveModules--; }
       this.stats.liveBytes = this.liveBytes;
       // Bound metadata/module retention, including permanently cold blocks.
@@ -63,7 +66,12 @@
     lookup(ptr) {
       const block = this.blocks.get(ptr);
       if (!block || block.failed) return 0;
-      if (block.fn) { if (!this.dispatch) this.stats.hits++; return block.fn; }
+      if (block.fn) {
+        // Native dispatch hits bypass JS; these lookups provide approximate recency.
+        this.compiled.delete(ptr); this.compiled.set(ptr, block);
+        if (!this.dispatch) this.stats.hits++;
+        return block.fn;
+      }
       if (++block.count < this.threshold) return 0;
       const start = performance.now();
       try {
@@ -72,18 +80,22 @@
         if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 8192) {
           this.stats.evictions++;
           this.dispatch?.clear();
-          // Retain translation identities so an evicted hot block can recompile.
-          for (const entry of this.blocks.values()) {
-            if (entry.fn) this.removeFunction(entry.fn);
+          // Free a quarter of capacity, retaining recent modules and translation
+          // identities. Clear native pointers before any table slot is reused.
+          for (const [address, entry] of this.compiled) {
+            if (this.liveBytes + bytes.length <= 12 * 1024 * 1024 && this.liveModules < 6144) break;
+            this.removeFunction(entry.fn);
             entry.fn = 0; entry.count = 0;
+            this.liveBytes -= entry.bytes; this.liveModules--;
+            this.compiled.delete(address);
           }
-          this.liveBytes = 0;
-          this.liveModules = 0;
+          this.stats.liveBytes = this.liveBytes;
         }
         const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes),
           { e: { m: this.memory, s: this.step, c: this.dispatch?.call } });
         block.fn = this.addFunction(instance.exports.run, 'iiiii');
         block.bytes = bytes.length;
+        this.compiled.set(ptr, block);
         this.liveModules++;
         this.liveBytes += bytes.length;
         this.stats.liveBytes = this.liveBytes;

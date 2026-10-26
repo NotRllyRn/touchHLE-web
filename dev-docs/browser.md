@@ -2210,3 +2210,59 @@ Final Chromium CPU/fiber suite passes the crossing-store/second-page invalidatio
 regression. Formatting/diff checks pass. Retain the page lookup for its measured
 library-access gain with the fixed4 MiB cost. Fresh game loading and two-lesson
 validation remain required; under10 s/30 FPS/input/device acceptance stays open.
+
+Page-map clean TinkerBox trial on313e6160: terms142 s, menu162 s, training
+match242 s/input245 s, Play match462 s/input465 s. Selection-to-Play input220 s
+versus228 s previously; still near10 s screenshot precision, ~3 FPS. No build,
+test or profiler overlapped that interval; source-only edits were prepared.
+Lesson1 SUCCESS562 s and Lesson2 SUCCESS1242 s verified with pinch and touch
+placement; later times overlap diagnostic work and are correctness evidence.
+Inspector stopped via Stop. `target/jit-page-map-{game,driver,drag}.log` and
+`target/browser-jit-page-map/canvas-{562,1242}.png`. Goal targets remain unmet.
+
+### Partial compiler-cache eviction experiment (2026-10-26)
+
+The clean page-map run logged24.65 s compilation by452 s (29550 compiled blocks,
+three capacity flushes);27.75 s by472 s. Rather than discard all compiled blocks
+at capacity, the experiment removes older modules until75% of byte/module
+capacity remains. Limits stay8192 modules/16 MiB emitted bytes and65536
+translation identities. Native dispatch is cleared before table-slot removal.
+Translation metadata remains, permitting recompilation. Lookups refresh recency;
+native dispatch hits bypass JS, so this is approximate recency, not exact LRU.
+The bounded compiled-module map is cleared on reset and re-registration.
+
+JS26 pass, including byte/module pressure, retained modules, re-registration,
+metadata-based recompilation and a failed table allocation after eviction with
+accurate memory accounting. Actual ARM capacity regression executes9000 distinct
+two-instruction blocks, revisits hot/old code, checks all results, confirms a
+capacity eviction under forced JIT, then replaces old code through a guest store.
+It passes Node and Chromium along with the existing CPU/fiber corpus. The shared
+CPU browser timeout is now120 s because this deliberate stress compiles over
+8192 modules; it is not a startup-performance test. Other timeouts are unchanged.
+Logs `target/jit-partial-cache-{js,final-build,final-node,final-browser}.log`.
+
+New `web/bench-jit-cache.mjs` replays4096 hot blocks with8192 streamed blocks in
+512-block phases, checking executed results and cache bounds. It measures only
+compiler-cache pressure, excluding ARM translation and the native dispatch cache;
+it cannot establish game speed. Paired runs and ordinary CPU benchmarks pending.
+
+Cache-pressure paired new/old/new five-trial medians3.593/4.375/3.709 s, ranges
+3.067–4.154/3.690–5.186/3.327–4.112 s. Every new-policy trial compiles12288
+modules versus16384 under whole-cache flushing (25% fewer); live modules8190
+versus8192, below the same production limits. New policy batches two evictions
+versus one whole flush. Node22.22.3, no concurrent game/build/test.
+Baseline compiler is313e6160's `web/tci-jit.js`, copied locally and selected with
+`JIT_COMPILER=target/tci-jit-before-partial-cache.js node web/bench-jit-cache.mjs`.
+Logs `target/jit-partial-cache-pressure-{new,old,repeat}.log`. Native C dispatch
+hits are not modeled by this replay, so real-game recency may be less accurate.
+
+Same-runtime CPU enabled/disabled/enabled five-trial medians (ms): library-memory
+5.907/5.658/5.535; data-memory5.885/5.687/5.491; code-page memory49.475/50.858/
+49.529; SVC107.008/103.876/103.662. Word-aligned doubleword load4.458/4.415/
+4.282, store6.697/4.566/4.664; ordinary doubleword store7.062/4.682/4.571.
+First-pass warmup variation remains; no persistent large regression in this
+comparison. `target/jit-partial-cache-cpu-comparison.log`. No concurrent workload.
+Static build and all nine forced-JIT graphics fixtures each pass twice. No C/Rust
+production change required a runtime relink; the worker imports the updated
+compiler independently. Retain pending fresh game timing/correctness.
+`target/jit-partial-cache-web-build.log` and graphics logs. Acceptance stays open.

@@ -17,7 +17,7 @@ try {
       const timeout = setTimeout(() => {
         worker.terminate();
         reject(new Error('Shared CPU test timed out'));
-      }, 30000);
+      }, 120000); // Capacity regression compiles more than 8192 distinct modules.
       const finish = callback => {
         clearTimeout(timeout);
         worker.terminate();

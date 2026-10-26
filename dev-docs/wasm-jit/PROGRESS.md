@@ -268,3 +268,14 @@ regression passes Chromium (Node passes). Fresh game measurement remains next.
 
 Final Chromium crossing-store invalidation test passes. Formatting/diff pass.
 Retain page lookup; start fresh game measurement and two-lesson validation next.
+
+Page-map game: menu162 s, training245 s to Play465 s =220 s, ~3 FPS. Both
+lessons SUCCESS562/1242 s verified; targets remain unmet. Partial cache eviction
+prototype passes JS26 and actual Node/Chromium9000-block capacity/guest rewrite
+regression. Limits unchanged; dispatch cleared before removal, approximate
+lookup recency preserves retained modules. Paired benchmarks now running.
+
+Partial eviction: cache-pressure medians3.593/4.375/3.709 s;12288 vs16384
+compiles (25% fewer). Ordinary CPU medians broadly stable after warmup. All nine
+graphics fixtures twice pass. Retain pending real-game loading/two-lesson checks;
+synthetic recency does not include native C-cache hits. M4/M5 remain open.
