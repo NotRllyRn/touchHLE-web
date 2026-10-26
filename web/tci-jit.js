@@ -226,14 +226,15 @@
             for (const r of [0,2]) {
               reg(r); constant(0x7fffffff); emit(0x71); set(22);
               get(22); emit(0x45);
-              get(22); constant(0x00800000); emit(0x4f);
-              get(22); constant(0x7f800000); emit(0x49, 0x71, 0x72, 0x71);
+              // Unsigned subtraction folds the normal range into one comparison.
+              get(22); constant(0x00800000); emit(0x6b);
+              constant(0x7f000000); emit(0x49, 0x72, 0x71);
             }
             emit(0x04, 0x7f);
             reg(0); emit(0xbe); reg(2); emit(0xbe, [0x92,0x94,0x93,0x95][operation], 0xbc); set(21);
             get(21); constant(0x7fffffff); emit(0x71); set(22);
-            get(22); constant(0x00800000); emit(0x4b);
-            get(22); constant(0x7f800000); emit(0x49, 0x71);
+            get(22); constant(0x00800001); emit(0x6b);
+            constant(0x7effffff); emit(0x49);
             emit(0x05); constant(0); emit(0x0b, 0x04, 0x40);
             get(21); put(0); constant(0); put(1);
             emit(0x05); invoke(); emit(0x0b);

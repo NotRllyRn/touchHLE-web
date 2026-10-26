@@ -217,3 +217,17 @@ Eight-patch roundtrip/idempotence and formatting pass. Full build/HLE pending.
 Guarded-float full runtime, nine forced-JIT graphics fixtures twice and actual
 audio pass. Retain; fresh clean game measurement and two-lesson validation
 remain next. No under10 s/real-time or hardware-device acceptance claim.
+
+Guarded-float clean game: menu182 s; training267 s to Play input497 s (230 s;
+Play screenshot492 s), ~3 FPS. Lesson1 and Lesson2 SUCCESS verified; Lesson2
+screenshot1032 s follows diagnostic work and is correctness evidence only.
+Named-block profiling after45 s warmup reports67.4% idle, with graphics queries
+prominent and no dominant individual CPU block. Defer broad register promotion;
+measure graphics query wall time. M4/M5 and goal remain open.
+
+Direct graphics queries total ~724 ms/15.19 s at3.09 FPS, confirming earlier
+software-GPU observations. Guard magnitude range simplification passes JS23,
+actual Node/Chromium CPU/fibers and two forced-JIT HLE runs. Repeat paired
+sticky multiply medians4.176/4.652/4.530 ms; modest gain only. Both lesson
+checks precede this last equivalent guard simplification. Next: profile loading
+on the current compiler; broad CPU-state promotion still needs evidence.

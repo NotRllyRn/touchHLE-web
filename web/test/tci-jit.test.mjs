@@ -157,7 +157,8 @@ test('guarded float operations retain rounding, flag and special-value fallback'
   const value=x=>{bitsView.setUint32(0,x,true);return bitsView.getFloat32(0,true);};
   const normalOrZero=x=>!(x&0x7fffffff)||((x&0x7fffffff)>=0x00800000&&(x&0x7fffffff)<0x7f800000);
   const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[Infinity,1],[NaN,1],
-    [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(1),1]].map(p=>p.map(bits));
+    [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(0x00800001),1],
+    [value(0x007fffff),1],[value(0x7f7fffff),1],[value(1),1]].map(p=>p.map(bits));
   for(let i=0;i<300;i++)pairs.push([random(),random()]);
   const operations=[(a,b)=>a+b,(a,b)=>a*b,(a,b)=>a-b,(a,b)=>a/b];
   for(let operation=0;operation<4;operation++) {

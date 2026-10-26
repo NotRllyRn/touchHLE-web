@@ -1993,3 +1993,60 @@ failures; actual Web Audio passes. `target/jit-float-guard-TEST_*.log` and
 `target/jit-float-guard-audio.log`. Retain this guarded implementation for its
 measured eligible-case gain and passing regressions. Fresh clean TinkerBox
 loading/gameplay validation follows; M4/M5 and the goal remain open.
+
+Guarded-float clean TinkerBox trial (e9391fe6): menu matched182 s; training
+selected267 s; Play matched492 s and clicked497 s, giving230 s selection-to-
+Play input (225 s to screenshot match), versus250 s in the previous bridge
+trial. Approximately3 FPS. This is one trial with10 s screenshot sampling,
+not statistical acceptance. No concurrent build/profile before Play497 s.
+Lesson1 completed; Lesson2 SUCCESS verified in `canvas-1032.png` after pinch,
+tray opening, ball drag and Play. Later diagnostics perturb timing.
+Artifacts: `target/jit-float-guard-game.log`,
+`target/browser-jit-float-guard/lesson2-placed.png` and `canvas-1032.png`.
+
+The15.6 s `target/jit-float-guard-play-profile/summary.json` has13354 samples,
+4827 generated-Wasm,1957 idle,1209 dispatcher,1083 CPU execution and798 compile.
+Its screenshot shows the transition into Lesson2, so it is not comparable to
+previous steady-play profiles with60% idle. A diagnostic-only custom Wasm name
+section identified generated blocks without changing their instructions. It
+clears native dispatch before removing table entries, retains translation
+metadata, and restores the compiler and evicts instrumentation in finally.
+First sample still overlapped recompilation; a second uses45 s warmup then15 s
+sampling:13009 samples,8762 idle (67.4%),440 CPU execution,378 getParameter,
+268 dispatcher,160 getTexParameter,53 getRenderbufferParameter. The hottest
+individual named block has44 samples. Logs `target/jit-named-blocks{,-steady}.log`.
+This does not yet justify CPU environment register promotion. Measure graphics
+query wall time next. Both samples are diagnostics, not acceptance trials.
+Under10 s loading, real-time simulation,30 FPS, input latency and hardware/
+multiple-browser validation remain unmet or unmeasured; M4/M5 remain open.
+
+Direct WebGL query timing during the guarded-float game's later training screen:
+15188.9 ms observation,47 frames (~3.09 FPS). MAX_TEXTURE_MAX_ANISOTROPY_EXT
+257 queries221.5 ms; TEXTURE_MAX_ANISOTROPY_EXT257 queries183.4 ms;
+viewport94 queries110.2 ms; renderbuffer width/height47 each42.4/30.9 ms.
+Total measured queries ~724 ms, consistent with the earlier software-raster
+investigation; these queries alone do not explain the frame interval. Probe
+restored original GL methods. `target/jit-gl-query-profile.log`. Inspector was
+stopped deliberately through Stop after both lesson correctness checks.
+
+A smaller float-guard experiment replaces each two-sided normal-range test
+with unsigned subtraction and one comparison. For inputs, `(m-0x00800000) <
+0x7f000000` (unsigned32) accepts normal magnitudes; zero remains a separate
+accepted case. Results use `(m-0x00800001) < 0x7effffff`, retaining the strict
+FLT_MIN exclusion. Wrapping excludes subnormals; infinities/NaNs remain outside.
+Existing boundary tests now also cover adjacent values below/above FLT_MIN
+and largest finite times1. No helper, memory, exception or native changes.
+
+Same-binary new/old/new five-trial medians (ms), repeat with no concurrent
+build/game/test: sticky normal-add5.018/5.103/4.580; sticky normal-multiply
+4.176/4.652/4.530; sticky zero-add6.061/4.804/4.865; sticky zero-multiply
+fallback12.200/11.962/11.125. Clear normal-add23.022/21.932/21.610; clear
+normal-multiply20.437/19.364/19.264; SVC105.329/104.933/105.996.
+Warmup variation remains; only modest eligible-case improvement, no game-level
+claim. Initial comparison overlapped the subsecond JS test; use the repeat
+for evidence. `target/jit-float-range-{comparison,repeat}.log`.
+JS23, rebuilt actual Node/Chromium CPU/fibers including all65536-operation
+FP fingerprints and repeated instances pass. Browser build and two actual
+forced-JIT HLE MIPMAP runs pass. No Rust/C change required a runtime relink;
+the game worker imports the updated compiler from the rebuilt static files.
+Logs `target/jit-float-range-{js,build,node,browser,web-build,hle}.log`.
