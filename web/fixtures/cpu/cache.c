@@ -87,5 +87,19 @@ void cache_checks(void) {
   uint32_t r2;
   assert(uc_reg_read(cpu, UC_ARM_REG_R2, &r2) == UC_ERR_OK);
   assert(r2 == 1 && calls == 64);
+  // Warm a linked loop while stores target data, then overwrite the loop's
+  // own STR with MOV. A compiled self-backedge must observe invalidation.
+  const uint32_t self_code[] = {0xe5810000, 0xe2522001, 0x1afffffc};
+  assert(uc_mem_write(cpu, 0x2000, self_code, sizeof(self_code)) == UC_ERR_OK);
+  assert(uc_ctl_flush_tb(cpu) == UC_ERR_OK);
+  for (unsigned i = 0; i < 64; ++i) {
+    reg(cpu, UC_ARM_REG_R0, 0xe3a0002a); reg(cpu, UC_ARM_REG_R1, 0x3000);
+    reg(cpu, UC_ARM_REG_R2, 4);
+    assert(uc_emu_start(cpu, 0x2000, 0x200c, 0, 0) == UC_ERR_OK);
+  }
+  reg(cpu, UC_ARM_REG_R0, 0xe3a0002a); reg(cpu, UC_ARM_REG_R1, 0x2000);
+  reg(cpu, UC_ARM_REG_R2, 2);
+  assert(uc_emu_start(cpu, 0x2000, 0x200c, 0, 0) == UC_ERR_OK);
+  assert(r0(cpu) == 42);
   assert(uc_close(cpu) == UC_ERR_OK);
 }

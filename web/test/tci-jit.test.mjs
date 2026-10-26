@@ -255,3 +255,21 @@ test('exit predicate specialization never skips another helper identity', () => 
   f.run();
   assert.equal(calls, 1);
 });
+
+
+test('same-block links loop with local registers and observe unlinking', () => {
+  // add r0,1; branch to exit if r0==10; otherwise follow mutable goto link.
+  const add = op('add_i32',0,0,...imm(1));
+  const branchSize = 13;
+  const jumpStart = 1024 + add.length + branchSize;
+  const displacement = (jumpStart + 5) & ~3;
+  const jump = op('goto_tb', ...Array(displacement - jumpStart - 2).fill(0), ...word(1024 - displacement - 4));
+  const branch = op('brcond_i32',0,...imm(10),8,...word(jumpStart + jump.length));
+  assert.equal(branch.length,branchSize);
+  const f = fixture([...add,...branch,...jump,...exit()]);
+  assert.equal(f.run(),0); assert.equal(f.regs()[0],10);
+  // An unlinked exit must return to the dispatcher, with all registers saved.
+  new DataView(f.memory.buffer).setInt32(displacement,2048-displacement-4,true);
+  f.regs()[0]=0;
+  assert.equal(f.run(),2048); assert.equal(f.regs()[0],1);
+});

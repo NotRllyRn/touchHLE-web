@@ -135,6 +135,7 @@
         restore(outputs);
       };
       restore();
+      emit(0x03, 0x40); // Same-block backedges keep TCI registers in locals.
       for (const _ of labels) emit(0x02, 0x40);
       for (const { pc, size, name, target } of ops) {
         if (labels[0] === pc) { emit(0x0b); labels.shift(); }
@@ -213,7 +214,11 @@
           // Unicorn patches this relative displacement when linking/unlinking TBs.
           // Read it at execution time; never bake a mutable link into generated code.
           const address = (pc + 5) & ~3;
-          save(); constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a, 0x0f);
+          constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a); set(21);
+          // Recheck the mutable link every iteration, including after code writes.
+          // Budgets and exit checks still execute at the beginning of the block.
+          get(21); constant(start); emit(0x46, 0x0d, ...uleb(labels.length));
+          save(); get(21); emit(0x0f);
           cursor = pc + size;
         } else if (['qemu_ld_i32', 'qemu_st_i32'].includes(name) && this.dispatch?.readLayout) {
           const store = name === 'qemu_st_i32';
@@ -266,7 +271,7 @@
         if (cursor !== pc + size) throw new Error(`TCI operand mismatch: ${name}`);
       }
       if (labels.length) throw new Error('Unresolved TCI labels');
-      emit(0x00, 0x0b); // Falling off a translated block is an internal error.
+      emit(0x00, 0x0b, 0x00, 0x0b); // Neither block nor loop may fall through.
       const body = [3, 16, 0x7f, 1, 0x7e, 2, 0x7f, ...out];
       return new Uint8Array([
         0, 97, 115, 109, 1, 0, 0, 0,

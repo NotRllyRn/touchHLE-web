@@ -1625,3 +1625,73 @@ POINT_PARAMETERS, PRESENT_BUFFERS), with local GET-only traffic. Actual Web Audi
 passes (`target/jit-exit-predicate-retry-TEST_*.log`, `jit-exit-predicate-audio.log`).
 Patch roundtrip and formatting/diff checks pass. Starting a fresh full game on
 this verified runtime with no concurrent build or benchmark.
+
+### Clean predicate-backend game interval and loop experiment (2026-10-26)
+
+Fresh Chromium run on a03e0005 (`target/jit-exit-predicate-game.log`) had no
+concurrent build/benchmark/profile through first Play. Terms visible by182 s,
+main menu by212 s. Exact driver inputs: terms185, main215, puzzles246,
+training286, Play617 s. Thus level-selection-to-Play was331 s including screenshot
+matching delay (screenshots every10 s, two matches). First matching playable
+screenshot is613 s. These are single-run local-server observations, not3-trial
+medians or precise subsecond transition times. Startup/level targets remain unmet.
+Reported simulation~2.5–2.7 FPS; simulation speed and input p95 are unmeasured.
+The run became diagnostic after first Play. Lesson2 genuine touch placement and
+SUCCESS were verified (`canvas-1134.png`), followed by Lesson3. No injected game
+state. Second Play1087 s is diagnostic, not a timing comparison.
+
+Post-Play profile (`target/jit-exit-predicate-play-profile/summary.json`):13,997
+samples, idle8,371, generated Wasm1,106, interpreter/helper455, cpu_exec433,
+getParameter349, dispatcher307, run_call304. This overlaps progression into later
+training screens, not a sustained60-second physics sample. No `/dev/dri` hardware
+GPU is exposed. Timer instrumentation found50 zero-delay callbacks totaling5.7 ms
+across15,187.7 ms; requested timeouts do not explain the idle samples. Initial
+Playwright worker lookup failed (no worker on the CDP-attached page); direct
+Runtime attachment succeeded without enabling Debugger. GL method timing over
+15,111 ms totals roughly0.65 s, primarily synchronous state queries. Probe logs:
+`jit-exit-predicate-{timers,timers-retry,gl}.log`.
+
+MessagePort instrumentation identifies a much larger delay:422 deliveries spend
+9,077.9 ms pending across15,129.8 ms; max249 ms. An in-place diagnostic routing
+of that channel through scheduler.yield reduces510 deliveries to35.4 ms total,
+max3.1 ms, over15,674 ms, but reported FPS improves only modestly (~3.4 vs~3).
+A repeated channel probe initially saw zero events because the preceding test
+restored an own native postMessage property, bypassing prototype instrumentation.
+Delete that diagnostic-only own property before probing:442 deliveries again
+spend9,105.5 ms pending over15,172.5 ms. This invalid repeat is retained in its log;
+use `jit-exit-predicate-yields-repeat-fixed.log`. A longer scheduler-profile probe
+is pending; no scheduler API source change has been accepted yet.
+
+Compiler experiment: same-block linked backedges branch to an outer Wasm loop,
+keeping TCI temporaries in locals. Every iteration rereads the mutable link and
+still executes the block's budget/exit checks. Other targets return to C with
+registers saved. No native tail-call extension or speculative cross-block merge.
+JS20 pass, Node/Chromium CPU/fibers pass, including an actual warmed loop whose
+own STR is replaced by a guest store with MOV; it must execute the new instruction
+(`target/jit-self-{loop,mod-loop}-{build,node,browser}.log`).
+
+Same-Wasm five-trial A/B/A (loop enabled/disabled/enabled), ms:
+tiny5.284/9.622/3.889; medium4.694/9.370/3.698; long6.786/10.987/5.744;
+code-page memory54.297/56.558/50.977; separate-data7.007/10.564/6.057;
+SVC182.750/179.413/178.692. Disable only the emitted self-backedge in a copied JS
+initializer, retaining identical runtime Wasm. Logs `jit-self-loop-comparison.log`.
+Diagnostic browser suspended/resumed in finally20.762 s for benchmark compilation
+and7.047 s for A/B/A; no concurrent build during benchmark execution. Compiled-hit
+counter counts C dispatches, so internal loop iterations no longer increment it
+(504,095 dispatches in the full benchmark vs2,903,327 previously). Keep this
+semantic distinction when comparing counters. Full HLE/game verification pending.
+
+Self-loop compiler web build and all nine forced-JIT HLE graphics fixtures pass
+twice (`target/jit-self-loop-web-build.log`, `jit-self-loop-TEST_*.log`).
+The predicate game ends normally at1803.7 s with zero compiler failures. A later
+all-WebGL-method probe could not attach (ECONNREFUSED after normal run end), so
+it provides no timing data (`jit-exit-predicate-gl-all.log`).
+
+Longer scheduler.yield diagnostic:1497 deliveries total98.6 ms pending over45.183 s;
+profile still46.8% idle (5995/12801 samples), so reduced channel delay is only a
+partial improvement. Crucially, the new real Asyncify responsiveness assertion
+rejects pure scheduler.yield: an input ping is processed only after all2000 yields
+finish (50.9 ms in the tiny fixture; unbounded starvation in sustained execution
+is unacceptable). Failed log `target/jit-scheduler-api-check.log`. Do not ship
+that version. Testing ordinary scheduler.postTask instead, with MessageChannel
+fallback and explicit mid-execution input progress assertions for both paths.

@@ -124,3 +124,16 @@ Predicate runtime rebuild succeeds after an interrupted link; restarted stopped
 local server. Nine graphics fixtures twice and actual audio pass; JS19, patch
 roundtrip and formatting/diff pass. Latest full-game run is next; no performance
 acceptance claim yet.
+
+Latest committed backend clean first-Play interval: terms by182 s, menu by212 s,
+training input286 s, Play617 s (331 s including driver sampling).~2.5–2.7 FPS;
+performance targets still unmet. Diagnostic continuation verifies Lesson2 SUCCESS
+and Lesson3. Profiling now shows60% idle; MessageChannel delivery delays dominate
+the measured waiting, with scheduler.yield under evaluation.
+
+Same-block Wasm loops pass JS20 and actual CPU/fiber/self-modification tests.
+Same-Wasm A/B/A medium4.694/9.370/3.698 ms and data-memory7.007/10.564/6.057 ms.
+Full HLE/game checks pending before commit. Detailed failures/probes in browser.md.
+Self-loop HLE graphics matrix passes twice. Pure scheduler.yield rejected by new
+input-during-execution assertion (ping starved until all2000 yields finished).
+Testing ordinary postTask and MessageChannel fallback before any scheduler commit.
