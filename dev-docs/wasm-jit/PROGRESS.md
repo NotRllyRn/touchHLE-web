@@ -313,3 +313,10 @@ running. Next consider an ordinary-call dispatch loop, subject to measurement.
 Retained linked-code regression passes baseline Node/Chromium CPU/fibers, JS26
 and formatting. Negative performance/resource evidence documented; no tail-call
 runtime implementation retained. Next dispatch experiment remains open.
+
+Ordinary-call generated dispatcher rejected: only2–3% targeted gain does not
+justify a second path. Simpler temporary transfer elimination passes JS28,
+actual Node/Chromium CPU/cache/fibers and nine graphics fixtures twice. Linked
+ARM loop108/135/108 ms new/old/new (~20% less), emitted benchmark code25.4%
+smaller. Native/dispatcher unchanged. Fresh game timing and both lessons next;
+M4/M5 remain open and synthetic improvements are not acceptance.

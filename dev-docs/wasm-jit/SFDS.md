@@ -150,3 +150,15 @@ Tests exercise both byte and module limits, failed function-table insertion,
 re-registration and reset. Actual ARM capacity testing compiles more than8192
 modules, revisits code, checks results and rewrites a prior block through a guest
 store. The synthetic cache-pressure benchmark is distinct from game acceptance.
+
+## Temporary register transfers
+
+For each compiled block, track registers definitely assigned on the current
+forward path, registers written anywhere emitted so far, and incoming registers
+read before assignment. Clear definite assignments at forward joins as a
+conservative merge. Prepend loads only for needed incoming values; save only
+written registers on ordinary exits. Helper input/output contracts remain
+unchanged, with full state transfer for unclassified operations. Preserve the
+incoming value when a branch skips a write. Same-block loops keep locals, as
+before. Validate randomized skipped writes, helper state, actual CPU fingerprints,
+linked code invalidation, fibers and game behavior before acceptance.

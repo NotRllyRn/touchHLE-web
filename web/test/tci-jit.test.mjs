@@ -485,3 +485,33 @@ test('page lookup covers library mappings without crossing pages or bypassing co
     f.run();assert.equal(calls,before+1);
   }
 });
+
+test('forward joins preserve registers when assignments are skipped', () => {
+  const branch=op('brcond_i32',0,...imm(0),8,...word(1024+13+7));
+  const f=fixture([...branch,...op('movi_i32',1,...word(42)),...exit()]);
+  for(let trial=0;trial<1000;trial++) {
+    const initial=Array.from({length:16},()=>random());initial[0]=trial&1;
+    f.regs().set(initial);f.run();
+    const expected=[...initial];if(initial[0])expected[1]=42;
+    assert.deepEqual(Array.from(f.regs()),expected);
+  }
+});
+
+test('unclassified helpers retain full temporary state across partial writes', () => {
+  const memory=new WebAssembly.Memory({initial:4});
+  const unknown=names.length;
+  const code=[...op('movi_i32',0,...word(42)),unknown,2,...op('add_i32',3,7,...imm(1)),...exit()];
+  new Uint8Array(memory.buffer).set(code,1024);
+  const regs=new Uint32Array(memory.buffer,128,16);
+  const initial=Array.from({length:16},()=>random());regs.set(initial);
+  const jit=new globalThis.TouchHLETciJit(memory,(env,ptr,pc)=>{
+    assert.equal(ptr,128);assert.equal(pc,1031);
+    assert.deepEqual(Array.from(regs),initial.map((v,i)=>i===0?42:v));
+    regs[7]=123;return pc+2;
+  },fn=>fn,()=>{},1);
+  jit.names=[...names,'unclassified'];jit.register(1024,code.length);
+  const fn=jit.lookup(1024);assert.ok(fn,jit.stats.lastFailure);
+  assert.equal(fn(0,128,512,256),0);
+  initial[0]=42;initial[3]=124;initial[7]=123;
+  assert.deepEqual(Array.from(regs),initial);
+});

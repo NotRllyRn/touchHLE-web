@@ -2421,3 +2421,45 @@ cargo fmt --check and git diff --check pass. Logs
 already passed interpreter/JIT guest assertions in the exploratory build;
 its same-Wasm baseline comparison verifies the existing compiler. No production
 runtime code change remains from this experiment.
+
+### Ordinary dispatch loop and temporary transfers (2026-10-26)
+
+A single generated dispatch loop using ordinary calls avoids both prior tail-call
+problems, and JS27 plus interpreter/JIT benchmark assertions pass. Same-Wasm
+new/old/new linked-loop medians133.214/135.542/131.634 ms, code-page memory
+49.116/47.957/47.899, SVC123.034/120.716/122.231. No competing workload.
+`target/jit-dispatch-loop-{build,js,comparison}.log`. A2–3% targeted gain with
+no broader clear win does not justify a second runtime dispatcher; reject it.
+Prototype compiler and metadata restored before the next experiment. Local
+rejected copies remain under target, not production source.
+
+Next candidate reduces temporary-register transfers within existing compiled
+blocks: load only registers read before a definite assignment, and save only
+written registers at exits. Forget definitions at forward joins conservatively,
+so skipped writes preserve original values. Unknown helpers retain all inputs/
+outputs. No CPU architecture, dispatcher, or native change. JS28 pass, including
+1000 randomized skipped-assignment preservation cases and an unclassified helper
+reading/writing full state. Actual CPU/fiber tests and production CPU benchmark
+rebuild running; no game claim yet.
+
+Initial same-Wasm new/old/new linked-loop129.657/134.473/108.709 ms shows warmup
+variation; library-memory5.621/5.594/5.283, code-page47.712/50.719/47.237,
+SVC122.783/119.267/119.292. `target/jit-temp-liveness-initial-comparison.log`.
+This preliminary binary still contains the rejected optional dispatcher branch,
+disabled for every case. Repeat with the restored production C before retaining.
+
+Restored production-C comparison, no competing workload: new/old/new medians
+linked-blocks108.208/134.997/108.034 ms (~20% less), SVC120.824/119.364/
+118.132, library-memory5.844/5.710/5.597, data-memory5.748/5.720/5.548,
+code-page memory47.921/48.252/49.438. Other cases show warmup/noise without a
+persistent large regression. All guest assertions pass, zero compiler failures.
+Each case compiles114 modules; emitted bytes133593/179170/133593 (25.4% less).
+Compilation totals186.649/214.881/159.626 ms; not isolated compile-time medians.
+`target/jit-temp-liveness-comparison.log`. Synthetic gain only, not game speed.
+Actual Node/Chromium CPU/cache/fiber suites and JS28 pass; full graphics fixtures
+running. No C/Rust production change requires relinking the accepted runtime.
+
+Static build and nine forced-JIT graphics fixtures each pass twice, formatting/
+diff pass. Logs `target/jit-temp-liveness-{web-build,MIPMAP,COMBINE,LIGHTING,
+LIGHT_ATTENUATION,LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log`.
+Retain pending clean game measurement and both lessons; no real-time claim.

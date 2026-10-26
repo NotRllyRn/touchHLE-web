@@ -134,23 +134,23 @@
       const get = i => emit(0x20, ...uleb(i));
       const set = i => emit(0x21, ...uleb(i));
       const constant = value => emit(0x41, ...sleb(value));
-      const reg = i => { if (i > 15) throw new Error('Invalid TCI register'); get(i + 4); };
-      const put = i => { if (i > 13) throw new Error('Invalid TCI destination'); set(i + 4); };
-      const save = (indices = Array.from({ length: 16 }, (_, i) => i)) => {
+      const defined = new Set(), written = new Set(), needed = new Set();
+      const reg = i => { if (!defined.has(i)) needed.add(i); if (i > 15) throw new Error('Invalid TCI register'); get(i + 4); };
+      const put = i => { if (i > 13) throw new Error('Invalid TCI destination'); defined.add(i); written.add(i); set(i + 4); };
+      const save = (indices = written) => {
         for (const i of indices) { get(1); reg(i); emit(0x36, 2, ...uleb(i * 4)); }
       };
       const restore = (indices = Array.from({ length: 16 }, (_, i) => i)) => {
-        for (const i of indices) { get(1); emit(0x28, 2, ...uleb(i * 4)); set(i + 4); }
+        for (const i of indices) { get(1); emit(0x28, 2, ...uleb(i * 4)); set(i + 4); defined.add(i); written.add(i); }
       };
       const helper = (pc, inputs, outputs) => {
-        save(inputs); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
+        save(inputs ?? Array.from({ length: 16 }, (_, i) => i)); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
         restore(outputs);
       };
-      restore();
       emit(0x03, 0x40); // Same-block backedges keep TCI registers in locals.
       for (const _ of labels) emit(0x02, 0x40);
       for (const { pc, size, name, target } of ops) {
-        if (labels[0] === pc) { emit(0x0b); labels.shift(); }
+        if (labels[0] === pc) { emit(0x0b); labels.shift(); defined.clear(); }
         let cursor = pc + 2;
         const byte = () => view.getUint8(cursor++);
         const word = () => { const value = view.getUint32(cursor, true); cursor += 4; return value; };
@@ -341,7 +341,12 @@
       }
       if (labels.length) throw new Error('Unresolved TCI labels');
       emit(0x00, 0x0b, 0x00, 0x0b); // Neither block nor loop may fall through.
-      const body = [3, 16, 0x7f, 1, 0x7e, 2, 0x7f, ...out];
+      // Only inputs read before a definite assignment need entry loads. At
+      // forward joins definitions are conservatively forgotten; untouched
+      // registers stay in memory, and exits save only registers written here.
+      const entry = [];
+      for (const i of needed) entry.push(0x20, 1, 0x28, 2, ...uleb(i * 4), 0x21, ...uleb(i + 4));
+      const body = [3, 16, 0x7f, 1, 0x7e, 2, 0x7f, ...entry, ...out];
       return new Uint8Array([
         0, 97, 115, 109, 1, 0, 0, 0,
         ...section(1, [3, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
