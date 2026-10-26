@@ -267,21 +267,31 @@
               (alignment <= width || alignment === 7) &&
               (!store || this.dispatch.readLayout.length >= 5)) {
             const [engine, base, size, pointer, codePages] = this.dispatch.readLayout;
-            get(0); emit(0x28, 2, ...uleb(engine));
-            reg(address); constant(31); emit(0x76); constant(2); emit(0x74, 0x6a); set(21);
-            reg(address); get(21); emit(0x28, 2, ...uleb(base), 0x6b); set(22);
-            reg(address); constant(wordAligned ? 3 : bytes - 1); emit(0x71, 0x45);
-            get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x4f, 0x71);
-            get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x6b, 0x4d, 0x71);
+            const pageMap = this.dispatch.pageMap;
+            if (pageMap !== undefined) {
+              get(0); emit(0x28, 2, ...uleb(engine));
+              reg(address); constant(12); emit(0x76); constant(2); emit(0x74, 0x6a, 0x28, 2, ...uleb(pageMap)); set(21);
+              reg(address); constant(4095); emit(0x71); set(22);
+              reg(address); constant(wordAligned ? 3 : bytes - 1); emit(0x71, 0x45);
+              get(21); emit(0x45, 0x45, 0x71);
+              get(22); constant(4096 - bytes); emit(0x4d, 0x71);
+            } else {
+              get(0); emit(0x28, 2, ...uleb(engine));
+              reg(address); constant(31); emit(0x76); constant(2); emit(0x74, 0x6a); set(21);
+              reg(address); get(21); emit(0x28, 2, ...uleb(base), 0x6b); set(22);
+              reg(address); constant(wordAligned ? 3 : bytes - 1); emit(0x71, 0x45);
+              get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x4f, 0x71);
+              get(22); get(21); emit(0x28, 2, ...uleb(size)); constant(bytes); emit(0x6b, 0x4d, 0x71);
+            }
             if (store) {
               // Keep relaxed doubleword stores within one checked code page.
-              if (wordAligned) { reg(address); constant(4095); emit(0x71); constant(4088); emit(0x4d, 0x71); }
+              if (wordAligned && pageMap === undefined) { reg(address); constant(4095); emit(0x71); constant(4088); emit(0x4d, 0x71); }
               get(0); emit(0x28, 2, ...uleb(engine));
               reg(address); constant(15); emit(0x76, 0x6a, 0x2d, 0, ...uleb(codePages));
               constant(1); reg(address); constant(12); emit(0x76); constant(7); emit(0x71, 0x74, 0x71, 0x45, 0x71);
             }
             emit(0x04, store ? 0x40 : wide ? 0x7e : 0x7f);
-            get(21); emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a);
+            get(21); if (pageMap === undefined) emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a);
             if (store) {
               reg(value);
               if (wide) { emit(0xad); reg(high); emit(0xad, 0x42, 32, 0x86, 0x84); }

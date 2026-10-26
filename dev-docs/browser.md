@@ -2158,3 +2158,55 @@ Word-aligned full static build and all nine forced-JIT graphics fixtures each
 pass twice (`target/jit-word-aligned-<GRAPHICS_FIXTURE>.log`). Formatting/diff
 checks pass. Retain the alignment extension; fresh game performance and both
 lessons on this final compiler remain next. No acceptance target is closed.
+
+Word-aligned clean TinkerBox trial (f1ce8c52): terms142 s, menu172 s,
+training match252 s/input259 s, Play match482 s/input487 s. Level-selection-
+to-Play input228 s versus233 s previously, within10 s screenshot sampling;
+~3 FPS. No competing build/test/profile before Play; source-only edits during
+that interval. Later validation is diagnostic. `target/jit-word-aligned-{game,
+driver}.log`, screenshots `target/browser-jit-word-aligned/`. Targets remain open.
+
+Next prototype adds a4 MiB per-engine array of immutable host page pointers,
+filled only by the adapter's mapping opt-in. Each generated access requires a
+mapped page, original alignment and an endpoint within that page. Stores also
+check the existing translated-code bitmap. Unmapped, crossing and unsupported
+accesses retain Unicorn helpers; native paths are unchanged. The legacy two-
+region path remains for runtime artifacts without page-map metadata. Do not
+coalesce independently allocated guest mappings. JS25 pass; actual ARM/library
+mapping and invalidation checks are building. No performance claim yet.
+
+Page-map actual Node and Chromium CPU/fibers pass, including all floating-point
+fingerprints, repeated instances, library endpoints, two adjacent guest pages
+with nonadjacent host backing, unmapped-boundary faults and replacing executed
+library instructions. JS25 also checks current-engine selection and memory
+growth. Patch reverse/reapply byte comparison passes for all eight patches;
+existing budget-patch EOF whitespace warning remains. Full runtime rebuild
+is in progress. Logs `target/jit-page-map-{js,build,node,browser}.log`.
+
+Word-aligned build confirms Lesson1 SUCCESS582 s and Lesson2 SUCCESS965 s
+with pinch and touch-drag placement. These later timings overlap diagnostics/
+builds, so are correctness evidence only. Inspector stopped through Stop after
+full build completion. Screenshots `target/browser-jit-word-aligned/canvas-
+{582,965}.png`; drag log `target/jit-word-aligned-drag.log`.
+
+Page-map full runtime and static rebuilds pass. All nine forced-JIT graphics
+fixtures each pass twice. Paired same-binary enabled/disabled/enabled five-trial
+medians (ms), no concurrent game/build/test: library-memory5.707/82.537/5.742;
+low data-memory5.661/6.010/5.548; code-page memory49.888/50.448/49.038;
+SVC107.021/104.563/104.875. Doubleword-load4.690/4.719/4.442; word-aligned
+load4.392/4.550/4.429; doubleword-store5.076/5.964/4.664; word-aligned store
+4.695/5.719/4.483. Sticky multiply4.613/4.617/4.637. First-case warmup variation
+remains; targeted library gain is clear, but no full-game improvement claimed.
+`target/jit-page-map-{comparison,runtime-build,web-build}.log` and graphics logs.
+Benchmark-build timings overlap the diagnostic game/build and are not used.
+
+An additional actual ARM regression executes code on the second of two adjacent,
+separately backed guest pages, then stores a doubleword across the boundary from
+the unexecuted first page and verifies the replacement instruction on the second
+page executes. Final Node CPU suite passes; final Chromium run pending.
+`target/jit-page-map-final-{build,node,browser}.log`.
+
+Final Chromium CPU/fiber suite passes the crossing-store/second-page invalidation
+regression. Formatting/diff checks pass. Retain the page lookup for its measured
+library-access gain with the fixed4 MiB cost. Fresh game loading and two-lesson
+validation remain required; under10 s/30 FPS/input/device acceptance stays open.

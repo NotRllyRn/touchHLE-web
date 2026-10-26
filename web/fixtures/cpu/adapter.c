@@ -20,9 +20,12 @@ void touchHLE_web_map_memory(void *mem, Cpu *cpu) {
   uint32_t *high_memory = (uint32_t *)mem + 2048;
   high_memory[0] = 0x11223344; high_memory[1022] = 0x44332211; high_memory[1023] = 0x88776655;
   touchHLE_web_map(cpu, 0xfffff000, 4096, high_memory);
+  touchHLE_web_map(cpu, 0x30000000, 4096, (uint32_t *)mem + 3072);
+  touchHLE_web_map(cpu, 0x30001000, 4096, (uint32_t *)mem + 5120);
+  touchHLE_web_map(cpu, 0x3748a000, 4096, (uint32_t *)mem + 4096);
 }
 void adapter_checks(void) {
-  uint32_t *code = calloc(1, 12288);
+  uint32_t *code = calloc(1, 24576);
   assert(code);
   Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
   uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
@@ -251,6 +254,54 @@ void adapter_checks(void) {
   assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == -2);
   assert(store_regs[15] == 0x1004);
   touchHLE_DynarmicWrapper_delete(store_cpu);
+  // Smaller library mappings in the same address-space half as low RAM.
+  code[0] = 0xe5920000; code[1] = 0xe2800001; // ldr r0,[r2]; add r0,#1
+  code[2] = 0xe5820000; code[3] = 0xef000042; // str r0,[r2]; svc
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  const uint32_t library_bases[] = {0x30000000,0x3748a000};
+  for (unsigned trial = 0; trial < 64; ++trial) {
+    unsigned offset = trial & 1 ? 4096 : 3072;
+    code[offset+1023] = trial;
+    regs[2] = library_bases[trial&1]+4092; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(regs[0] == trial+1 && code[offset+1023] == trial+1);
+  }
+  // Adjacent guest pages are deliberately nonadjacent in host storage.
+  code[4095] = 0x89abcdef; code[5120] = 0xfff81234;
+  code[0] = 0xed920b00; code[1] = 0xec510b10; code[2] = 0xef000042;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  regs[2] = 0x30000ffc; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(regs[0] == 0x89abcdef && regs[1] == 0xfff81234);
+  regs[2] = 0x30001ffc; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
+  assert(regs[15] == 0x1000);
+  // Crossing store: only the second page has translated code. The helper
+  // must invalidate that page even though the starting page is ordinary data.
+  code[5120] = 0xe3a0002a; code[5121] = 0xef000043;
+  regs[15] = 0x30001000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+  assert(regs[0] == 42);
+  code[0] = 0xec410b10; code[1] = 0xed820b00; code[2] = 0xef000042;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  regs[0] = 0x89abcdef; regs[1] = 0xe3a00063;
+  regs[2] = 0x30000ffc; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  assert(code[4095] == 0x89abcdef && code[5120] == 0xe3a00063);
+  regs[15] = 0x30001000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+  assert(regs[0] == 99);
+  code[3072] = 0xe3a0002a; code[3073] = 0xef000043;
+  regs[15] = 0x30000000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+  assert(regs[0] == 42);
+  code[0] = 0xe5820000; code[1] = 0xef000042;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  regs[0] = 0xe3a00063; regs[2] = 0x30000000; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+  regs[15] = 0x30000000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x43);
+  assert(regs[0] == 99);
   // CPSR mode changes bank r8-r14. The adapter's supplied register state must
   // remain authoritative, as with the original write-CPSR-then-write-registers ABI.
   code[0] = 0xef000042;

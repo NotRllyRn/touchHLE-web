@@ -405,3 +405,55 @@ test('same-block links loop with local registers and observe unlinking', () => {
   f.regs()[0]=0;
   assert.equal(f.run(),2048); assert.equal(f.regs()[0],1);
 });
+
+test('page lookup covers library mappings without crossing pages or bypassing code invalidation', () => {
+  for (const store of [false,true]) for (const memop of [0,1,2,3,4,5]) {
+    if (store && memop >= 4) continue;
+    const width=memop&3, wide=width===3, bytes=1<<width;
+    let calls=0;
+    const f=fixture([...op(`qemu_${store?'st':'ld'}_i${wide?64:32}`,1,...(wide?[2]:[]),0,...word(memop<<4)),...exit()],
+      (_env,ptr)=>{calls++;const regs=new Uint32Array(f.memory.buffer,ptr,16);
+        if(store){assert.equal(regs[1],0x89abcdef);if(wide)assert.equal(regs[2],0xfff81234);}
+        else {regs[1]=0x11223344;if(wide)regs[2]=0x55667788;}return 0;},
+      {counter:96,clear(){},readLayout:[0,0,8,16,0x410000],pageMap:16384,unaligned:0});
+    f.memory.grow(70);
+    const view=()=>new DataView(f.memory.buffer), engine=4096;
+    view().setUint32(0,engine,true);
+    for(const [index,base] of [0x1000,0x30000000,0x3748a000,0xfffff000].entries()) {
+      const host=0x440000+index*8192, entry=engine+16384+(base>>>12)*4;
+      const flag=engine+0x410000+(base>>>15),bit=1<<((base>>>12)&7);
+      for(const mapped of [false,true])for(const translated of [false,true]) {
+        view().setUint32(entry,mapped?host:0,true);view().setUint8(flag,translated?bit:0);
+        for(const offset of [...new Set([0,4,4096-bytes,4092,4093,4096,-bytes])]) {
+          new Uint8Array(f.memory.buffer,host,8192).fill(0);
+          if(!store&&offset>=0&&offset+bytes<=4096){view().setUint32(host+offset,0x89abcdef,true);if(wide)view().setUint32(host+offset+4,0xfff81234,true);}
+          f.regs()[0]=(base+offset)>>>0;f.regs()[1]=0x89abcdef;f.regs()[2]=0xfff81234;
+          const fast=mapped&&(!store||!translated)&&offset>=0&&offset+bytes<=4096&&offset%(wide?4:bytes)===0;
+          const before=calls;f.run();assert.equal(calls-before,fast?0:1);
+          if(store&&offset>=0&&offset+bytes<=4096) {
+            const actual=wide?view().getBigUint64(host+offset,true):bytes===4?view().getUint32(host+offset,true):bytes===2?view().getUint16(host+offset,true):view().getUint8(host+offset);
+            assert.equal(actual,fast?(wide?0xfff8123489abcdefn:bytes===4?0x89abcdef:bytes===2?0xcdef:0xef):(wide?0n:0));
+          } else if(!store) {
+            const expected=fast?(bytes===1?(memop&4?0xffffffef:0xef):bytes===2?(memop&4?0xffffcdef:0xcdef):0x89abcdef):0x11223344;
+            assert.equal(f.regs()[1],expected);if(wide)assert.equal(f.regs()[2],fast?0xfff81234:0x55667788);
+          }
+        }
+      }
+      // Adjacent guest pages may have unrelated host allocations. Never coalesce.
+      if(wide&&base!==0xfffff000){
+        view().setUint32(entry,host,true);view().setUint32(entry+4,host+8192,true);view().setUint8(flag,0);
+        f.regs()[0]=base+4092;f.regs()[1]=0x89abcdef;f.regs()[2]=0xfff81234;
+        const before=calls;f.run();assert.equal(calls,before+1);
+        view().setUint32(entry+4,0,true);
+      }
+      f.memory.grow(1);
+    }
+    // The generated function must read the current engine on every dispatch.
+    view().setUint8(engine+0x410000,0);
+    f.regs()[0]=0x1000;f.regs()[1]=0x89abcdef;f.regs()[2]=0xfff81234;
+    const before=calls;f.run();assert.equal(calls,before);
+    view().setUint32(0,engine+1024,true); // distinct, unopted-in page table
+    f.regs()[0]=0x1000;f.regs()[1]=0x89abcdef;f.regs()[2]=0xfff81234;
+    f.run();assert.equal(calls,before+1);
+  }
+});

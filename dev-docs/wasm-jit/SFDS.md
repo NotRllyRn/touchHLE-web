@@ -136,3 +136,10 @@ alignment allows it. Stores crossing4 KiB pages retain helpers; reads cannot
 cross their host mapping. Missing metadata preserves legacy natural alignment.
 Tests cover strict/relaxed alignment, memory growth, endpoint/cross-region faults,
 NaN payloads and stores replacing previously translated instructions.
+
+Page-map metadata enables direct lookup of every opted-in immutable guest page,
+including small library mappings omitted by the legacy largest-region cache.
+Page-crossing reads and stores retain helpers, even when both pages are mapped;
+their host allocations may be unrelated. Regressions include byte/halfword/word/
+doubleword accesses, high addresses, memory growth, changing engines, unmapped
+pages and a crossing store that rewrites translated code on its second page.

@@ -254,3 +254,17 @@ consider bounded mapping lookup next. Under10 s/real-time targets remain open.
 
 Word-aligned full static build and nine graphics fixtures twice pass; formatting/
 diff pass. Retain pending fresh game measurements and two-lesson validation.
+
+Word-aligned clean game: menu172 s; training259 s to Play487 s =228 s, ~3 FPS.
+No material improvement beyond10 s screenshot precision. Both lessons pending.
+Preparing measured library-mapping coverage: bounded4 MiB page-pointer table,
+original alignment/page/code checks, legacy metadata fallback. JS25 pass; actual
+CPU regressions and benchmarks pending. M4/M5 remain open.
+
+Word-aligned game confirms both lessons (SUCCESS582/965 s). Page-map full build
+and nine graphics fixtures twice pass. Same-binary library-memory5.707/82.537/
+5.742 ms, low data5.661/6.010/5.548; retain if final cross-page code-invalidation
+regression passes Chromium (Node passes). Fresh game measurement remains next.
+
+Final Chromium crossing-store invalidation test passes. Formatting/diff pass.
+Retain page lookup; start fresh game measurement and two-lesson validation next.

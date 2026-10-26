@@ -11,8 +11,11 @@ extern void touchHLE_DynarmicWrapper_delete(Cpu *);
 extern uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *);
 extern int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *, void *, uint64_t *);
 extern void touchHLE_web_map(Cpu *, uint32_t, size_t, void *);
+_Alignas(8) static uint32_t library_page[1024];
 void touchHLE_web_map_memory(void *mem, Cpu *cpu) {
   touchHLE_web_map(cpu, 0x1000, 8192, mem);
+  library_page[0] = 0;
+  touchHLE_web_map(cpu, 0x30000000, 4096, library_page);
 }
 int main(void) {
   for (unsigned length = 1; length <= 64; length *= 8) {
@@ -121,7 +124,7 @@ int main(void) {
     free(code);
   }
   // Compare data sharing a translated page against a separate data page.
-  for (unsigned data_page = 0; data_page < 2; ++data_page)
+  for (unsigned data_page = 0; data_page < 3; ++data_page)
   for (unsigned trial = 0; trial < 5; ++trial) {
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xe5920000; // ldr r0,[r2]
@@ -132,7 +135,7 @@ int main(void) {
     code[5] = 0xef000042;
     Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
     uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
-    regs[1] = 100000; regs[2] = data_page ? 0x2800 : 0x1800; regs[15] = 0x1000;
+    regs[1] = 100000; regs[2] = data_page == 2 ? 0x30000000 : data_page ? 0x2800 : 0x1800; regs[15] = 0x1000;
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -142,9 +145,9 @@ int main(void) {
       result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
     } while (result == -1);
     double ms = emscripten_get_now() - start;
-    assert(result == 0x42 && regs[0] == 100000 && code[data_page ? 1536 : 512] == 100000);
+    assert(result == 0x42 && regs[0] == 100000 && (data_page == 2 ? library_page[0] : code[data_page ? 1536 : 512]) == 100000);
     printf("BENCH {\"kind\":\"%s\",\"trial\":%u,\"instructions\":500001,\"ms\":%.3f}\n",
-           data_page ? "data-memory" : "memory", trial, ms);
+           data_page == 2 ? "library-memory" : data_page ? "data-memory" : "memory", trial, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }

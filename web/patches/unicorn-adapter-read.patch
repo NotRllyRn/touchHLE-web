@@ -1,6 +1,6 @@
 --- a/include/uc_priv.h
 +++ b/include/uc_priv.h
-@@ -331,6 +331,13 @@
+@@ -331,6 +331,15 @@
      RAMList ram_list;               // qemu/exec.c
      /* qemu/exec.c */
      unsigned int alloc_hint;
@@ -8,6 +8,8 @@
 +    // Opt-in immutable RWX host mapping owned by the touchHLE adapter only.
 +    uint32_t touchhle_read_base[2], touchhle_read_size[2];
 +    uint8_t *touchhle_read_pointer[2];
++    uint8_t *touchhle_read_pages[1 << 20];
++    bool touchhle_direct_memory;
 +    // Conservative: once translated, a 4 KiB guest page always uses MMU stores.
 +    uint8_t touchhle_code_pages[1 << 17];
 +#endif
@@ -16,7 +18,7 @@
      int target_bits; // User defined page bits by uc_ctl
 --- a/uc.c
 +++ b/uc.c
-@@ -110,6 +110,24 @@
+@@ -110,6 +110,31 @@
          free(h);
      }
  }
@@ -27,6 +29,13 @@
 +UNICORN_EXPORT void touchHLE_uc_read_region(uc_engine *uc, uint32_t base,
 +                                           uint32_t size, void *pointer)
 +{
++    // Page lookup covers every immutable adapter mapping, including dylibs.
++    if (size && !(base & 4095) && !(size & 4095) &&
++        (uint64_t)base + size <= (UINT64_C(1) << 32)) {
++        uc->touchhle_direct_memory = true;
++        for (uint32_t offset = 0; offset < size; offset += 4096)
++            uc->touchhle_read_pages[(base >> 12) + (offset >> 12)] = (uint8_t *)pointer + offset;
++    }
 +    // Largest fixed region in each address-space half: low RAM and high stack.
 +    // A region crossing the half boundary retains normal MMU handling.
 +    unsigned slot = base >> 31;
@@ -88,7 +97,7 @@
  
  _end_loop:
 +#ifdef __EMSCRIPTEN__
-+    if (uc->touchhle_read_size[0] || uc->touchhle_read_size[1]) {
++    if (uc->touchhle_direct_memory) {
 +        uint64_t end = (uint64_t)db->pc_first + (db->pc_next - db->pc_first);
 +        for (uint64_t page = db->pc_first >> 12; page < (1 << 20) && page * 4096 < end; ++page)
 +            uc->touchhle_code_pages[page >> 3] |= 1 << (page & 7);

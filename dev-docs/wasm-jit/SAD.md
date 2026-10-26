@@ -110,3 +110,14 @@ Doubleword stores share the direct-memory mapping and code-page gate.
 C-exported alignment metadata also permits word-aligned doubles; a separate
 page-boundary check keeps those stores inside one checked code page. Other
 accesses retain the helper, including original exception semantics.
+
+## Immutable mapping lookup
+
+Browser engines carry a bounded4 MiB page-pointer table, populated only through
+the adapter's immutable-mapping opt-in. Generated memory accesses use the current
+engine's table, preserving engine isolation and Wasm memory growth. They require
+a nonzero mapped-page pointer, allowed alignment and a complete access within
+that page. Stores retain the translated-page bitmap gate. All other accesses
+use the original helpers. Older runtime metadata retains the two-region path;
+no guest mappings are enlarged or coalesced. The extra table cost applies to
+each browser engine and is absent from native builds.
