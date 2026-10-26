@@ -45,7 +45,7 @@ int main(void) {
     free(code);
   }
   for (unsigned sticky = 0; sticky < 2; ++sticky)
-  for (unsigned kind = 0; kind < 9; ++kind) for (unsigned trial = 0; trial < 5; ++trial) {
+  for (unsigned kind = 0; kind < 11; ++kind) for (unsigned trial = 0; trial < 5; ++trial) {
     if (sticky && kind == 4) continue;
     uint32_t *code = calloc(1, 8192);
     code[0] = 0xee000a10; code[1] = 0xee001a90; code[2] = 0xeee12a10;
@@ -54,7 +54,7 @@ int main(void) {
     code[6] = 0xee100a10; code[7] = 0xeef11a10; code[8] = 0xef000042;
     if (kind == 4) { code[3] = 0xee301a20; code[6] = 0xee110a10; } // add into s2, keep inputs
     if (kind >= 7) {
-      for (unsigned i = 3; i < 35; ++i) code[i] = 0xee300a20; // 32 dependent vadds
+      for (unsigned i = 3; i < 35; ++i) code[i] = kind == 9 ? 0xeeb10a40 : kind == 10 ? 0xeeb00ac0 : 0xee300a20; // 32 dependent VFP operations
       code[35] = 0xe2533001; code[36] = 0x1affffdd;
       code[37] = 0xee100a10; code[38] = 0xeef11a10; code[39] = 0xef000042;
     }
@@ -65,6 +65,7 @@ int main(void) {
     if (kind == 4) { regs[1] = 0xbf800000; regs[2] = 0x10; } // -1, sticky inexact
     if (kind == 5 || kind == 6) regs[0] = regs[1] = 0x7fc00000;
     if (kind == 8) { regs[0] = 0x7fc00000; regs[1] = 0; }
+    if (kind >= 9) regs[0] = 0xff812345; // Preserve signaling NaN payload
     double start = emscripten_get_now();
     int result;
     unsigned slices = 0;
@@ -75,8 +76,8 @@ int main(void) {
     } while (result == -1);
     double ms = emscripten_get_now() - start;
     union {float f; uint32_t bits;} value = {.bits = regs[0]};
-    assert(result == 0x42 && (kind == 5 || kind == 6 || kind == 8 ? value.bits == 0x7fc00000 : value.f == (kind == 7 ? 3200001.0f : kind == 2 ? 100001.0f : kind == 1 || kind == 4 ? 0.0f : 1.0f)) && regs[1] == (sticky || kind == 4 ? 0x10 : 0));
-    const char *name[] = {"float-add-zero", "float-mul-zero", "float-add-normal", "float-mul-normal", "float-cancel", "float-mul-nan", "float-add-nan", "float-add-chain", "float-add-chain-nan-zero"};
+    assert(result == 0x42 && (kind >= 9 ? value.bits == (kind == 9 ? 0xff812345 : 0x7f812345) : kind == 5 || kind == 6 || kind == 8 ? value.bits == 0x7fc00000 : value.f == (kind == 7 ? 3200001.0f : kind == 2 ? 100001.0f : kind == 1 || kind == 4 ? 0.0f : 1.0f)) && regs[1] == (sticky || kind == 4 ? 0x10 : 0));
+    const char *name[] = {"float-add-zero", "float-mul-zero", "float-add-normal", "float-mul-normal", "float-cancel", "float-mul-nan", "float-add-nan", "float-add-chain", "float-add-chain-nan-zero", "float-neg-chain", "float-abs-chain"};
     printf("BENCH {\"kind\":\"%s%s\",\"trial\":%u,\"instructions\":%u,\"ms\":%.3f}\n", name[kind], sticky ? "-sticky" : "", trial, kind >= 7 ? 3400006 : 300006, ms);
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);

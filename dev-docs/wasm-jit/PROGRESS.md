@@ -431,3 +431,29 @@ menu142 s, Training206 to Play364 =158 s vs168 s prior (single-run difference
 of one screenshot interval); FPS median3.16 vs3.25, no gain. Both lessons SUCCESS
 432/622 s with real zoom/placement. Retain small tested shortcut; next profile
 remaining startup helpers. M4/M5 and thread goal remain open.
+
+
+68dd7612 committed/pushed. Diagnostic startup helper distribution identifies
+9,037,030 VNEG calls out of32,846,477 total. Implemented exact single-precision
+VNEG/VABS sign-bit operations using C-exported identities. JS29 pass,1280 actual
+ARM edge/FPSCR combinations added; interpreter/JIT/browser and benchmarks pending.
+Goal remains active, next clean game requires updated runtime relink.
+
+
+Sign-helper CPU/FPSCR/cache/fiber regressions pass in Node and Chromium.
+Same-runtime new/old/new sign chains~2.9x faster, bytes-3.9%, zero compiler
+failures; compilation335.8 to428.6 ms in final group. Runtime rebuilding;
+all graphics and clean game timing/lessons remain required before retention.
+
+
+Runtime rebuild and all nine forced-JIT graphics fixtures pass twice. Initial
+default-threshold fixture invocation failed compilation coverage (documented);
+corrected threshold1 passes. Clean TinkerBox sign-helper run now in progress;
+no game-speed claim, commit or retention decision yet.
+
+
+Sign-helper clean game passes both lessons SUCCESS473/633 s, zoom/touch placement.
+Menu152 s, level158 s (unchanged), median first-minute FPS3.205 (50 samples).
+Retain~2.9x targeted speedup/smaller code without claiming whole-game improvement.
+Next use full startup CPU sample stacks to attribute time beyond helper counts.
+M4/M5 and goal remain active; hardware GPU/mobile coverage still missing.

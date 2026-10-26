@@ -41,7 +41,7 @@
 +             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]},
 +             floatMath: {callees: Array.from(HEAPU32.subarray((layout >> 2) + 7, (layout >> 2) + 11)),
 +              rounding: HEAPU32[(layout >> 2) + 11], flags: HEAPU32[(layout >> 2) + 12],
-+              nearest: HEAPU32[(layout >> 2) + 13], inexact: HEAPU32[(layout >> 2) + 14]}, unaligned: HEAPU32[(layout >> 2) + 15], pageMap: HEAPU32[(layout >> 2) + 16]});
++              nearest: HEAPU32[(layout >> 2) + 13], inexact: HEAPU32[(layout >> 2) + 14]}, unaligned: HEAPU32[(layout >> 2) + 15], pageMap: HEAPU32[(layout >> 2) + 16], floatUnary: Array.from(HEAPU32.subarray((layout >> 2) + 17, (layout >> 2) + 19))});
 +    }
 +    return !!Module['tciJit'];
 +});
@@ -165,7 +165,7 @@
 +            (uintptr_t)glue(adapter_helper_, vfp_adds), (uintptr_t)glue(adapter_helper_, vfp_muls),
 +            (uintptr_t)glue(adapter_helper_, vfp_subs), (uintptr_t)glue(adapter_helper_, vfp_divs),
 +            offsetof(float_status, float_rounding_mode), offsetof(float_status, float_exception_flags),
-+            float_round_nearest_even, float_flag_inexact, MO_UNALN, offsetof(struct uc_struct, touchhle_read_pages)
++            float_round_nearest_even, float_flag_inexact, MO_UNALN, offsetof(struct uc_struct, touchhle_read_pages), (uintptr_t)glue(adapter_helper_, vfp_negs), (uintptr_t)glue(adapter_helper_, vfp_abss)
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
 +            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout, (uintptr_t)touchhle_tci_call);

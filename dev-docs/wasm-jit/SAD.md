@@ -145,3 +145,12 @@ no suspension state. Use exact names, retain production assertions/stack checks,
 and keep Rust/HLE/fibers instrumented. CPU/fiber, fault, floating-point and game
 regressions gate this boundary; synthetic improvements alone do not establish
 real-time game acceptance. Native execution is unchanged.
+
+
+## Exact floating-point sign helpers
+
+C exports identities for the pinned single-precision VNEG/VABS helpers alongside
+the existing arithmetic layout. Their direct calls become integer sign-bit XOR
+or AND, preserving all other bits and FPSCR without reading status. Dynamic and
+unknown helper calls retain the existing bridge. This avoids floating-point
+canonicalization of signaling/payload NaNs and does not require an ARM decoder.

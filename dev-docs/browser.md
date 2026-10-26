@@ -2913,3 +2913,61 @@ served from web/dist. Inspector exited1 after deliberate Stop; driver exited0.
 Next: diagnostic startup helper distribution after these shortcuts; keep its
 instrumented timings separate from acceptance. Native/mobile/other-browser
 coverage is unchanged.
+
+
+Post-68dd7612 startup helper diagnostic: prototype wrapper installed before first
+compilation; this instrumented run is not acceptance timing. An initial launch
+failed ERR_CONNECTION_REFUSED because the static server had stopped; restart
+with python3 -m http.server 8765 --bind 127.0.0.1 --directory web/dist resolved it.
+Diagnostic completed180 s normally. Local logs target/jit-fallback-startup-
+{game,counts-early,counts-mid,counts-final}.log. At the final snapshot32,846,477
+helper calls included9,037,030 vfp_negs. Wasm table/name-section mapping identifies
+the helper; pinned vfp_helper.c implements float32_chs with no FPSCR access.
+
+Candidate: export VNEG/VABS single-precision helper identities in existing layout;
+compile their direct calls to i32 xor/and sign masks, return high word0. Preserve
+all payload bits, including signaling NaNs, and unchanged flags for every mode.
+No ARM decoder changes. JS29 pass; actual ARM fixture adds1280 sign/edge/mode
+checks, with interpreter reference first. Node/Chromium validation underway;
+new32-operation sign chains benchmark actual helper elimination and raw bits.
+Retain only after regression/performance/game validation; goal remains unmet.
+
+
+Sign helpers pass interpreter/JIT Node and Chromium CPU/FPSCR/cache/fibers,
+including1280 new ARM checks (target/jit-sign-{build,node,browser,js}.log).
+Isolated same-runtime new/old/new medians, five trials each, ms:
+VNEG chain38.883/113.351/38.124; VABS38.410/110.936/38.667 (~2.9x faster).
+Finite-add chain147.427/141.331/139.251; NaN/zero99.477/105.200/99.588;
+memory47.569/47.987/47.635; SVC117.263/117.040/117.015.
+Emitted515143/536263/515143 bytes (-3.9%);174 modules, zero failures.
+Compile459.95/335.79/428.61 ms, a modest absolute compilation regression
+requiring game assessment. Logs target/jit-sign-{benchmark,comparison}.log.
+Full runtime relink underway; graphics and fresh TinkerBox pending.
+
+
+Runtime rebuild passes. First graphics invocation mistakenly used the default
+32-hit JIT threshold; the short MIPMAP guest exited correctly but failed the
+required compiled-block coverage assertion. Preserved log
+target/jit-sign-MIPMAP-default-threshold-failed.log. Rerun with the documented
+`?cpu=jit&jitThreshold=1` to force compilation in short fixtures.
+
+
+Corrected forced-JIT graphics suite passes all nine fixtures twice, with zero
+compiler failures and only local static GET traffic; logs target/jit-sign-
+{MIPMAP,COMBINE,LIGHTING,LIGHT_ATTENUATION,LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,
+PRESENT_BUFFERS}.log. Clean uninstrumented game started with normal threshold32.
+Do not run competing benchmarks/builds until its first-minute FPS interval ends.
+
+
+Sign-helper clean game: menu152 s; Training229 to Play387 =158 s, identical
+to previous158 s. First60 s after Play:50 logged FPS samples, median3.205,
+range2.12–3.49 (previous3.16). Both lessons SUCCESS473/633 s; zoom and actual
+touch drag placement verified. Logs target/jit-sign-{game,driver}.log and local
+screenshots target/browser-jit-sign. Inspector exit1 follows deliberate Stop;
+driver exit0. Retain simpler generated code and~2.9x targeted throughput, but
+claim no material whole-game speedup. Formatting and diff checks pass.
+
+Under10 s/30 FPS targets remain open. Next capture full startup CPU sample
+stacks with helper names after this change; helper call counts alone do not
+measure time or justify further specialization. Keep instrumented and acceptance
+runs separate. Hardware-GPU/mobile and other-browser validation remain absent.

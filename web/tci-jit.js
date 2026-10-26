@@ -230,7 +230,13 @@
           };
           const fp = this.dispatch.floatMath;
           const operation = callee === null ? -1 : fp?.callees.indexOf(callee) ?? -1;
-          if (operation >= 0) {
+          const unary = callee === null ? -1 : this.dispatch.floatUnary?.indexOf(callee) ?? -1;
+          if (unary >= 0) {
+            // ARM VNEG/VABS manipulate the sign bit, preserving NaN payloads
+            // (including signaling NaNs), subnormals and all FPSCR flags.
+            reg(0); constant(unary === 0 ? 0x80000000 : 0x7fffffff);
+            emit(unary === 0 ? 0x73 : 0x71); put(0); constant(0); put(1);
+          } else if (operation >= 0) {
             // Pinned ARM rules return the same canonical quiet NaN without
             // flag changes for this exact pair, in every FPSCR mode.
             const incoming = new Set(defined);

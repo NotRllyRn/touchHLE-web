@@ -530,3 +530,21 @@ test('unclassified helpers retain full temporary state across partial writes', (
   initial[0]=42;initial[3]=124;initial[7]=123;
   assert.deepEqual(Array.from(regs),initial);
 });
+
+
+test('VFP sign helpers preserve raw bits without flags or helper calls', () => {
+  for (const unary of [0,1]) {
+    const f=fixture([...op('call',...imm(900+unary)),...exit()],undefined,
+      {counter:96,clear(){},floatUnary:[900,901],call(){throw Error('Unexpected helper');}});
+    const values=[0,0x80000000,1,0x80000001,0x7f800000,0xff800000,
+      0x7fc12345,0xffc12345,0x7f812345,0xff812345];
+    for(let i=0;i<1000;i++)values.push(random());
+    for(const value of values) {
+      f.regs().fill(0x12345678);f.regs()[0]=value;
+      f.run();
+      assert.equal(f.regs()[0],(unary===0?value^0x80000000:value&0x7fffffff)>>>0);
+      assert.equal(f.regs()[1],0);
+      assert.ok(f.regs().slice(2).every(x=>x===0x12345678));
+    }
+  }
+});

@@ -225,3 +225,14 @@ Test both orders across four operations and32 FPSCR modes (256 ARM checks),
 negative zero, signaling/payload NaNs and split-bit false positives. Benchmark
 finite and exceptional32-operation chains separately and check fresh game
 loading, both tutorial lessons and first-minute FPS before retention.
+
+
+## VNEG/VABS single precision
+
+For a direct call matching C-exported VNEG, set r0 to r0 XOR0x80000000; for VABS,
+set r0 to r0 AND0x7fffffff. Set normalized high return word r1 to0, preserving
+other TCI inputs and FPSCR. Do not route through Wasm floating-point arithmetic.
+Test raw signed zero, subnormal, infinity and signaling/quiet payload bits plus
+seeded words; check1280 original ARM edge/mode combinations against interpreter
+and JIT. Benchmark32-operation chains with exact payload/flag assertions and
+compare the same runtime with the previous compiler before fresh game testing.

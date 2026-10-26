@@ -320,6 +320,21 @@ void adapter_checks(void) {
   const uint32_t edge[] = {0,0x80000000,0x3f800000,0xbf800000,0x40000000,
     0xc0000000,0x00800000,0x80800000,0x7f7fffff,0xff7fffff,1,0x80000001,
     0x007fffff,0x807fffff,0x7f800000,0xff800000,0x7fc12345,0xffc12345,0x7f812345,0xff812345};
+  // VNEG/VABS are raw sign operations even for signaling NaNs and FZ/DN modes.
+  for (unsigned unary = 0; unary < 2; ++unary) {
+    code[0] = 0xee000a10; code[1] = 0xeee12a10; // vmov s0,r0; vmsr fpscr,r2
+    code[2] = unary ? 0xeeb00ac0 : 0xeeb10a40; // vabs/vneg s0,s0
+    code[3] = 0xee100a10; code[4] = 0xeef11a10; code[5] = 0xef000042;
+    touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+    for (unsigned mode = 0; mode < 32; ++mode) for (unsigned i = 0; i < sizeof(edge)/sizeof(*edge); ++i) {
+      uint32_t fpscr = ((mode & 3) << 22) | ((mode & 4) << 22) |
+                       ((mode & 8) << 22) | (mode & 16 ? 0x9f : 0);
+      regs[0] = edge[i]; regs[2] = fpscr; regs[15] = 0x1000; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+      assert(regs[0] == (unary ? edge[i] & 0x7fffffff : edge[i] ^ 0x80000000));
+      assert(regs[1] == fpscr);
+    }
+  }
   for (unsigned op = 0; op < 4; ++op) {
     code[0] = 0xee000a10; code[1] = 0xee001a90; // vmov s0,r0; vmov s1,r1
     code[2] = 0xeee12a10; code[3] = fp_ops[op]; // vmsr fpscr,r2; operation
