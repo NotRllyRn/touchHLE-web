@@ -1558,3 +1558,70 @@ Normal-budget-return full runtime build completed. Forced-JIT HLE mipmap passes
 twice with GET-only static traffic; all17 JS tests pass
 (`target/jit-budget-return-{runtime-build,mipmap,js}.log`). Formatting/diff and
 patch reverse/reapply checks pass (existing EOF whitespace warning unchanged).
+
+### Inline post-memory exit predicate (2026-10-26)
+
+Source inspection links the profile's exit-check cost to Unicorn's helper after
+memory operations. TCG cannot insert a branch there without disrupting liveness;
+the Wasm compiler can preserve its register locals. C now supplies the exact
+normalized helper table identity and env-relative icount-decrement offset. Only
+that immediate helper call is specialized. If the signed exit flag is negative
+and the delay-slot argument is zero, the original single-op helper still runs,
+including GETPC, restoration and unwinding. Otherwise write its normalized void
+return (r0:r1=0) without calling. Other helpers and dynamic calls are unchanged.
+This does not reintroduce the rejected direct normalized-helper call experiment.
+
+Node actual CPU and Chromium/fibers pass (`target/jit-exit-predicate-{build,node,
+browser}.log`); JS18 pass (`target/jit-exit-predicate-js.log`), including no-request,
+pending-request, delay-slot, return-register and throwing fallback cases. Added
+actual Unicorn valid-memory hook test:64 consecutive reads request stop, never
+execute the following ADD, then removing the hook permits that ADD. Node and
+Chromium/fibers pass (`target/jit-exit-stop-{build,node,browser}.log`). Existing
+fault/unmap/protection/code-write and Thumb IT resume tests remain enabled.
+
+Same-Wasm A/B/A comparison uses a copied generated initializer with only
+`exitCheck` metadata renamed to disable specialization. Five trials per case:
+- Separate-data memory: specialized11.418, helper32.048, specialized11.231 ms.
+- Code-page memory: specialized59.361, helper77.607, specialized58.182 ms.
+- Long arithmetic:11.920/11.732/11.319 ms; SVC184.138/179.450/184.454 ms,
+  illustrating variability on unaffected workloads.
+Logs `target/jit-exit-predicate-comparison.log`. An initial comparison script
+still named an older helper-read artifact; its output is preserved as
+`target/jit-exit-predicate-comparison-invalid.log` and excluded. Fixed script
+names the new helper-exit copy. Diagnostic browser suspended/resumed in finally:
+20.994 s for benchmark compilation/execution,7.589 s for valid A/B/A comparison;
+the invalid comparison pause has its separate log. No concurrent builds during
+valid benchmarks. Retain specialization for the reproducible memory improvement;
+full runtime rebuild and game effect remain pending.
+
+The older scheduler/store game run has verified Lesson1 SUCCESS (screenshot1240 s),
+Lesson2 pinch (driver1393 s), tray opening and genuine touch ball placement
+(`target/browser-jit-scheduler/lesson2-placed.png`). It is heavily diagnostic
+with profiles/builds/suspensions; no acceptance timing is inferred. Second Play
+has been requested, SUCCESS pending. New backend changes are not in that already
+loaded worker.
+
+Scheduler/store build also completes Lesson2 SUCCESS: second Play at1526 s,
+SUCCESS visible in `target/browser-jit-scheduler/canvas-1593.png`. This validates
+the two requested training interactions for that build, not real-time performance.
+The owned diagnostic inspector was terminated after recording success to release
+CPU/memory for the next clean run; any termination status is intentional.
+
+The predicate full-runtime build returned status143 during final optimization,
+with no compiler error in its log, after the diagnostic inspector was terminated.
+The cause is not established; do not treat its artifacts as validated. Rebuilding
+with no active game (`target/jit-exit-predicate-runtime-retry.log`) before testing.
+
+Retry full runtime build completed successfully. The first HLE test then failed
+before guest execution with `page.goto: net::ERR_CONNECTION_REFUSED` because the
+local static server had stopped (`target/jit-exit-predicate-TEST_MIPMAP.log`).
+Restarted the loopback server and rerunning fixtures under `jit-exit-predicate-retry-*`.
+The added different-helper-identity test brings JS total to19 passing tests
+(`target/jit-exit-predicate-final-js.log`).
+
+With the server restored, all nine forced-JIT HLE graphics fixtures pass twice
+(MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED,
+POINT_PARAMETERS, PRESENT_BUFFERS), with local GET-only traffic. Actual Web Audio
+passes (`target/jit-exit-predicate-retry-TEST_*.log`, `jit-exit-predicate-audio.log`).
+Patch roundtrip and formatting/diff checks pass. Starting a fresh full game on
+this verified runtime with no concurrent build or benchmark.

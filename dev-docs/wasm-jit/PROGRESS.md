@@ -110,3 +110,17 @@ explicitly excluded and build scripts now ensure Unicorn rebuilds before linking
 Full runtime/HLE verification pending; the diagnostic game continues on prior code.
 Normal budget return full build, HLE mipmap twice, JS17, formatting and patch
 roundtrip pass. Game-level speed and correctness on this change remain pending.
+
+Specialized post-memory exit predicates preserve the original exceptional helper
+and avoid ordinary no-op calls. Same-Wasm A/B/A data-memory medians11.418/32.048/
+11.231 ms, code-page59.361/77.607/58.182 ms; retain pending full runtime checks.
+JS18 and actual Node/Chromium CPU/fibers pass, including64 real memory-hook stops
+and resume after hook removal. Older game confirms Lesson1 SUCCESS and Lesson2
+pinch/placement; second simulation is underway. Targets and goal remain open.
+Scheduler/store game now confirms Lesson2 SUCCESS (screenshot1593 s after second
+Play1526 s), completing both training interactions for that build. Performance
+acceptance and latest-backend full-game validation remain outstanding.
+Predicate runtime rebuild succeeds after an interrupted link; restarted stopped
+local server. Nine graphics fixtures twice and actual audio pass; JS19, patch
+roundtrip and formatting/diff pass. Latest full-game run is next; no performance
+acceptance claim yet.

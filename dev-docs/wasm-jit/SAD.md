@@ -1,6 +1,6 @@
 # Browser CPU acceleration: software architecture
 
-Status: proposed, decisions gated by experiments. Updated: 2026-10-26.
+Status: implemented experimentally; game performance acceptance open. Updated: 2026-10-26.
 
 ## Existing boundaries
 
@@ -62,3 +62,9 @@ MessageChannel yields keep CPU slices cooperative without nested timer clamping;
 actual duration sleeps retain timer semantics. Compiler JS loads independently
 of the full runtime. Cache remains bounded (8192 modules, 16 MiB emitted bytes,
 65,536 translation identities); capacity flushes are counted explicitly.
+
+Normal adapter budget exhaustion returns through the translated block boundary
+with PC synchronized and pending Thumb IT state preserved. Actual exceptional
+exits still use Unicorn restoration/unwinding. The Wasm compiler specializes the
+known post-memory exit-check helper using its C-provided identity and layout:
+ordinary no-op checks stay in Wasm, pending exits retain the original helper.

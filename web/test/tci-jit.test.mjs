@@ -6,7 +6,7 @@ import '../tci-jit.js';
 const names = ['movi_i32', 'mov_i32', 'add_i32', 'sub_i32', 'mul_i32', 'shl_i32',
   'sar_i32', 'shr_i32', 'rotl_i32', 'rotr_i32', 'setcond_i32', 'brcond_i32',
   'exit_tb', 'goto_tb', 'add2_i32', 'sub2_i32', 'mulu2_i32', 'setcond2_i32',
-  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32'];
+  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32', 'call'];
 const word = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, n >>> 24];
 const imm = n => [255, ...word(n)];
 const op = (name, ...args) => [names.indexOf(name), args.length + 2, ...args];
@@ -218,4 +218,40 @@ test('inline byte and halfword loads/stores preserve signed values and boundarie
       }
     }
   }
+});
+
+
+test('exit-request helper fast path preserves delay slots, results and exceptional fallback', () => {
+  for (const request of [0, 1, 0x7fffffff, -1, -0x80000000]) for (const delay of [0, 1]) {
+    let calls = 0;
+    const f = fixture([...op('call', ...imm(37)), ...exit()], (_env, regs, pc) => {
+      calls++;
+      assert.equal(pc, 1024);
+      const r = new Uint32Array(f.memory.buffer, regs, 16);
+      assert.equal(r[0], 123); assert.equal(r[2], delay);
+      r[0] = 11; r[1] = 22;
+      return pc + 7;
+    }, {counter:96,clear(){},exitCheck:{callee:37,offset:64}});
+    new DataView(f.memory.buffer).setInt32(64, request, true);
+    f.regs()[0] = 123; f.regs()[1] = 456; f.regs()[2] = delay;
+    f.run();
+    const slow = request < 0 && !delay;
+    assert.equal(calls, slow ? 1 : 0);
+    assert.equal(f.regs()[0], slow ? 11 : 0); assert.equal(f.regs()[1], slow ? 22 : 0);
+    assert.equal(f.regs()[2], delay);
+  }
+  const failure = new Error('pending exit');
+  const f = fixture([...op('call', ...imm(37)), ...exit()], () => { throw failure; },
+    {counter:96,clear(){},exitCheck:{callee:37,offset:64}});
+  new DataView(f.memory.buffer).setInt32(64,-1,true);
+  assert.throws(() => f.run(), error => error === failure);
+});
+
+
+test('exit predicate specialization never skips another helper identity', () => {
+  let calls = 0;
+  const f = fixture([...op('call', ...imm(38)), ...exit()], () => { calls++; return 1031; },
+    {counter:96,clear(){},exitCheck:{callee:37,offset:64}});
+  f.run();
+  assert.equal(calls, 1);
 });

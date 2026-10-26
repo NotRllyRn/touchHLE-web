@@ -1,6 +1,6 @@
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -478,18 +478,49 @@
+@@ -478,18 +478,51 @@
  uintptr_t tci_tb_ptr;
  #endif
  
@@ -12,6 +12,7 @@
 -    uintptr_t sp_value = (uintptr_t)(tcg_temps + CPU_TEMP_BUF_NLONGS);
 +#ifdef __EMSCRIPTEN__
 +#include <emscripten.h>
++#include "exec/helper-proto.h"
 +typedef struct { uintptr_t key, function; } TouchhleDispatch;
 +static TouchhleDispatch touchhle_dispatch[8192];
 +static double touchhle_compiled_executions;
@@ -36,7 +37,8 @@
 +            wasmTable.get(step), addFunction, removeFunction,
 +            Module['tciJitThreshold'] ?? 32,
 +            {counter, clear: wasmExports['touchhle_tci_clear_dispatch'],
-+             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 5))});
++             readLayout: Array.from(HEAPU32.subarray(layout >> 2, (layout >> 2) + 5)),
++             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]}});
 +    }
 +    return !!Module['tciJit'];
 +});
@@ -108,7 +110,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1297,7 +1332,62 @@
+@@ -1297,7 +1332,64 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -142,7 +144,9 @@
 +        static const uint32_t read_layout[] = {
 +            offsetof(CPUArchState, uc), offsetof(struct uc_struct, touchhle_read_base),
 +            offsetof(struct uc_struct, touchhle_read_size), offsetof(struct uc_struct, touchhle_read_pointer),
-+            offsetof(struct uc_struct, touchhle_code_pages)
++            offsetof(struct uc_struct, touchhle_code_pages),
++            (uintptr_t)glue(adapter_helper_, check_exit_request),
++            offsetof(ArchCPU, neg.icount_decr.u32) - offsetof(ArchCPU, env)
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
 +            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout);

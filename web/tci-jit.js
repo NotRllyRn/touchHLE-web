@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // Runtime compiler for the pinned Unicorn 32-bit TCI bytecode. No ARM decoder.
-// Loaded as Emscripten pre-js and directly by the dependency-free Node tests.
+// Loaded by JIT workers, CPU fixture pre-js, and dependency-free Node tests.
 (() => {
   const uleb = value => {
     const bytes = [];
@@ -196,6 +196,16 @@
           const mask = ((2 ** bits - 1) << shift) | 0;
           reg(a); constant(~mask); emit(0x71); reg(b); constant(shift); emit(0x74);
           constant(mask); emit(0x71, 0x72); put(dst);
+        } else if (name === 'call' && this.dispatch?.exitCheck &&
+                   view.getUint8(cursor) === 255 &&
+                   view.getUint32(cursor + 1, true) === this.dispatch.exitCheck.callee) {
+          // The pinned normalized void helper returns zero in r0:r1. Keep its
+          // exception/GETPC path for actual requests; avoid its normal no-op call.
+          byte(); word();
+          get(0); constant(this.dispatch.exitCheck.offset); emit(0x6a, 0x28, 2, 0);
+          constant(0); emit(0x48); reg(2); emit(0x45, 0x71, 0x04, 0x40);
+          helper(pc, [0,1,2,3,5,6,7,8,9,10,11,12], [0,1]);
+          emit(0x05); constant(0); put(0); constant(0); put(1); emit(0x0b);
         } else if (name === 'exit_tb') {
           save(); get(3); constant(word()); emit(0x36, 2, 0); word();
           constant(0); emit(0x0f);

@@ -95,3 +95,8 @@ page marks, including pages that became code after the store block compiled.
 Cache-capacity evictions are reported separately from explicit resets. Scheduler
 regressions verify local Asyncify state across repeated yields, worker message
 handling and positive-duration sleep. Full-game acceptance remains outstanding.
+
+Budget-return regressions include Thumb conditional state across page boundaries.
+Post-memory exit predicates preserve normalized helper return registers and delay
+slots. Actual valid-memory hooks repeatedly stop before the following instruction,
+then resume after hook removal. Other helper identities use the existing path.
