@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Sparse-memory feasibility adapter, not yet connected to the HLE or CPU.
+//! Bounded guest memory shared by the browser HLE and CPU adapter.
 //! A mapping owns stable, 8-byte-aligned storage. Slices may cross guest pages
 //! within a mapping, but never bridge independently allocated host regions.
 

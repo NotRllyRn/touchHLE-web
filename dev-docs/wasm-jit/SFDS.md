@@ -1,6 +1,6 @@
 # Browser CPU acceleration: software functional design specification
 
-Status: initial design; refine interfaces after feasibility measurement.
+Status: experimental implementation; game performance acceptance remains open.
 Updated: 2026-10-26.
 
 ## Execution contract
@@ -21,7 +21,11 @@ comparison. JIT eligibility must never change which guest instruction executes.
 5. Execute compiled code on subsequent visits; account budgets and stop requests.
 6. Remove all associated compiled state on invalidation/reset/worker termination.
 
-Candidate counters: interpreted/compiled blocks, compile attempts/failures,
+Implemented counters include compiled blocks, failures, cumulative bytes/time,
+registered translations, resets, metadata resets and retained bytes. Compiled
+dispatches use a shared-memory counter; no per-instruction JS callback.
+
+Further candidate counters: interpreted/compiled blocks, compile attempts/failures,
 compiled bytes/time, helper calls, cache entries/evictions. Counters must have a
 bounded memory cost and avoid per-instruction logging in measured runs.
 
@@ -61,3 +65,18 @@ M5: regression/browser/device validation, docs, clean commits and source push.
 Each milestone records evidence in PROGRESS.md and ../browser.md. A failed
 experiment is recorded and may change architecture; it is never reported as a
 working game result. No shortcut may skip actual game execution.
+
+## Implemented hot-path contract
+
+Generated modules import the existing single-TCI-operation C helper as a raw
+Wasm function from the runtime table. The helper cannot suspend; Rust dispatches
+HLE only after the CPU returns. Asyncify still instruments fibers and the outer
+runtime. This avoids a JS wrapper per memory/VFP operation while preserving
+Unicorn exceptions. Modules retain TCI locals and transfer only helper operands
+and outputs. Bounded C dispatch entries are cleared before removing Wasm table
+functions; dynamic block links are loaded at execution time.
+
+Normal budget and pending-exit checks emit TCG operations. Exhaustion uses the
+original CPU stop/restore path; exact debugger stepping retains the instruction
+hook and flushes translations when modes change. Budget counts guest instructions,
+including one tick for a wide Thumb instruction; one block can overshoot.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Exercise the production adapter, including its tick accounting and stepping.
 #include <assert.h>
+#include <emscripten/heap.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +100,29 @@ void adapter_checks(void) {
   regs[15] = 0x1000; ticks = 100;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
   assert(regs[0] == 0x3f800000);
+  // Fast aligned reads, unaligned fallback, and both mapping boundaries.
+  code[0] = 0xe5910000; code[1] = 0xef000042; // ldr r0,[r1]; svc
+  code[1022] = 0x44332211; code[1023] = 0x88776655;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  touchHLE_DynarmicWrapper_set_cpsr(cpu, 0x10);
+  const uint32_t addresses[] = {0x1000, 0x1ffc, 0x1ff9};
+  const uint32_t expected[] = {0xe5910000, 0x88776655, 0x55443322};
+  for (unsigned pass = 0; pass < 2; ++pass) {
+    if (pass) assert(emscripten_resize_heap(emscripten_get_heap_size() + 64 * 1024 * 1024));
+    for (unsigned i = 0; i < 3; ++i) {
+      for (unsigned hot = 0; hot < 64; ++hot) {
+        regs[1] = addresses[i]; regs[15] = 0x1000; ticks = 100;
+        assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+        assert(regs[0] == expected[i]);
+      }
+    }
+  }
+  const uint32_t invalid[] = {0, 0x2000, 0x1ffd};
+  for (unsigned i = 0; i < 3; ++i) {
+    regs[1] = invalid[i]; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
+    assert(regs[15] == 0x1000);
+  }
   touchHLE_DynarmicWrapper_delete(cpu);
   free(code);
 }

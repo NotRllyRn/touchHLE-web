@@ -5,8 +5,8 @@ Updated: 2026-10-26. Thread goal: active.
 - [x] Inspect current CPU adapter and historical clean game acceptance.
 - [x] Create PRD, SAD and SFDS with measurable acceptance and regression gates.
 - [x] M0: validate and commit the existing uncommitted browser baseline.
-- [ ] M1: reproducible CPU baseline, current startup profile, architecture choice.
-- [ ] M2: compiled blocks, interpreter fallback and differential tests.
+- [x] M1: reproducible CPU baseline, current startup profile, architecture choice.
+- [x] M2: compiled blocks, interpreter fallback and differential tests.
 - [ ] M3: full runtime integration and hot-path coverage.
 - [ ] M4: real-time Training 01/Lesson 2 and startup target measurements.
 - [ ] M5: regression/browser/device results, final documentation and source push.
@@ -19,8 +19,8 @@ startup median exists. Working tree contains prior CPU/graphics/audio/input
 integration, retained intact. Proposed first experiment reuses Unicorn TCI
 semantics and compiles intermediate blocks; no implementation speedup claimed.
 
-Next: inventory available SDK/test inputs, run baseline checks, inspect TCI block
-format/helper interfaces and measure a representative translation prototype.
+Initial next step (completed): inventory SDK/test inputs, run baseline checks,
+inspect TCI interfaces and measure the translation prototype.
 
 Baseline checks pass: Rust browser 9, native 30, JS/Wasm 7, real headless HLE
 IPA twice in Chromium 141. Source/plans pushed as 0780424e. New compiler tests
@@ -67,3 +67,14 @@ single-op helper. Importing the same helper as a raw Wasm function passes Node,
 Chromium CPU/fibers, forced-JIT HLE mipmap twice, JS tests and Web Audio checks.
 Same-Wasm Asyncify memory-loop median falls 144.014 to 101.705 ms (five trials).
 Full-game retest underway; no real-time or startup acceptance claim yet.
+
+M1/M2 are complete: reproducible interpreter/JIT CPU benchmarks, later startup
+profiles, compiled path/fallback/cache bounds and differential/regression tests
+exist. M3 remains open for full game-driven integration; M4/M5 are unmet.
+
+Opted-in fixed-RAM aligned reads pass boundary/fault/memory-growth, Node/Chromium
+CPU/fibers, and nine graphics fixtures twice each. Isolated Asyncify memory-loop
+median improves 100.565 to 83.610 ms with fast reads. Source retains full store
+invalidation and all general-Unicorn semantics. Raw-helper game reaches terms
+and main menu at diagnostic driver clicks813/843 s, but no JIT playable level
+has yet been validated. Longer fast-read game run with guest FPS logging underway.

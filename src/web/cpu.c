@@ -13,6 +13,7 @@ extern void touchHLE_web_map_memory(void *mem, Cpu *cpu);
 extern size_t touchHLE_uc_executed(uc_engine *uc);
 extern void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining);
 extern int32_t touchHLE_uc_remaining(uc_engine *uc);
+extern void touchHLE_uc_read_region(uc_engine *uc, uint32_t base, uint32_t size, void *pointer);
 static const int registers[] = {UC_ARM_REG_R0,UC_ARM_REG_R1,UC_ARM_REG_R2,UC_ARM_REG_R3,
  UC_ARM_REG_R4,UC_ARM_REG_R5,UC_ARM_REG_R6,UC_ARM_REG_R7,UC_ARM_REG_R8,UC_ARM_REG_R9,
  UC_ARM_REG_R10,UC_ARM_REG_R11,UC_ARM_REG_R12,UC_ARM_REG_SP,UC_ARM_REG_LR,UC_ARM_REG_PC};
@@ -53,6 +54,9 @@ Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
 }
 void touchHLE_web_map(Cpu *cpu, uint32_t base, size_t len, void *pointer) {
   assert(uc_mem_map_ptr(cpu->uc, base, len, UC_PROT_ALL, pointer) == UC_ERR_OK);
+  // This adapter maps Rust-owned RAM once, never unmaps/protects it, and only
+  // installs interrupt/invalid-memory hooks. Keep the fast-read API private.
+  touchHLE_uc_read_region(cpu->uc, base, len, pointer);
 }
 void touchHLE_DynarmicWrapper_delete(Cpu *cpu) { uc_close(cpu->uc); free(cpu); }
 const uint32_t *touchHLE_DynarmicWrapper_regs_const(const Cpu *cpu) { return cpu->context.regs; }

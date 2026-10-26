@@ -31,6 +31,16 @@ try {
       }
     };
   });
+  // Diagnostic-only standard touchHLE options, e.g. bundle.id: --print-fps.
+  // Inject into this browser's worker response; never modify served artifacts.
+  if (process.env.INSPECTION_OPTIONS) await page.route('**/runtime-worker.js', async route => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const marker = "    runtime.FS.writeFile('/app.ipa',";
+    if (!source.includes(marker)) throw new Error('Runtime options injection point missing');
+    const setup = `    runtime.FS.writeFile('/touchHLE_options.txt', ${JSON.stringify(process.env.INSPECTION_OPTIONS)});\n`;
+    await route.fulfill({ response, body: source.replace(marker, setup + marker) });
+  });
   await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8765');
   await page.locator('#ipa').setInputFiles(ipa);
   await page.waitForFunction(() => !document.querySelector('#run').disabled);

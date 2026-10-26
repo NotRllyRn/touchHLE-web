@@ -1341,3 +1341,62 @@ Logs: `target/jit-{raw,wrapped}-step-async-benchmark.log`. Compilation/tiering
 included; these are synthetic measurements, not game FPS or startup claims.
 Actual Web Audio PCM/gain/scheduling/stop/cleanup test passes
 (`target/jit-raw-step-audio.log`). Fresh full-game run and later profile underway.
+
+Raw-step later profile (same 100 s delay/15 s sampling protocol, Chromium141,
+13,786 samples; `target/jit-raw-step-profile/summary.json`) removes Asyncify
+wrapper functions from the top costs. TCI interpreter 2,585, idle 2,547,
+load_helper 1,229, generated Wasm 1,004, mapping lookup 774, address translation
+692, single-op helper 601 and store_helper 534 self samples. The phase is not
+instruction-identical to the prior sample; compare diagnosis, not percentages as
+an end-to-end speedup. Subsequent game progress overlaps builds and is diagnostic.
+
+Fast-read experiment: only the production adapter opts into its largest immutable,
+identity-mapped RWX Rust-owned region. It has no unmap/protect/valid-read-hook API.
+Naturally aligned little-endian 32-bit TCI reads entirely inside that region can
+read its host pointer directly; stricter alignment requests, all other sizes,
+other mappings and faults retain soft-MMU handling. Stores always retain Unicorn
+invalidation. Wasm memory growth preserves the numeric host pointer. This API
+must not be enabled for general Unicorn engines or mutable mappings.
+Expanded production-adapter tests exercise both endpoints, unaligned reads,
+unmapped/cross-boundary faults, hot compiled loads and 64 MiB memory growth.
+Node and Chromium shared CPU/cache/context/fiber checks pass
+(`target/jit-fast-read-{node,browser}.log`); existing general-Unicorn protection,
+unmap/remap and guest-store invalidation cases still pass. Patch application is
+idempotent (`target/jit-fast-read-idempotent.log`). Full runtime build/measurement
+pending; do not retain solely on microbenchmark expectations.
+
+Fast-read full runtime build completes (`target/jit-fast-read-runtime-build.log`).
+Forced-JIT mipmap fixture passes twice; broader Chromium suite also passes each
+fixture twice: TEST_COMBINE, TEST_LIGHTING, TEST_LIGHT_ATTENUATION, TEST_LIGHT_SPOT,
+TEST_FOG, TEST_MAPPED, TEST_POINT_PARAMETERS, TEST_PRESENT_BUFFERS. Commands use
+`TEST_URL=http://127.0.0.1:8765/?cpu=jit&jitThreshold=1`, the named flag=1 and
+`PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+node web/test-runtime.mjs`. Logs: `target/jit-fast-read-TEST_*.log`. Static GET-only
+network assertions pass. Isolated fast-read performance measurement pending.
+Inspector accepts optional INSPECTION_OPTIONS standard touchHLE per-bundle
+options injected only into its worker response, to enable --print-fps without
+changing served artifacts or gameplay state. This diagnostic path needs a run.
+
+Fast reads retained after isolated same-library, same-Asyncify benchmark:
+five-trial JIT memory median 83.610 ms (82.140–92.348) versus 100.565 ms
+(99.975–102.435) with registration disabled (~16.9% reduction). Interpreter
+memory medians 138.048 versus 167.373 ms. Other JIT medians fast/disabled:
+tiny 10.262/9.991, medium 9.238/9.317, long 13.367/13.510, SVC181.107/180.979 ms.
+Commands: CPU_ASYNCIFY=1 node web/bench-cpu.mjs; comparison sets
+CPU_ADAPTER=target/browser-cpu/no-fast-read.c, a copy of src/web/cpu.c with only
+its touchHLE_uc_read_region call removed. Logs `target/jit-{fast,no-fast}-read-benchmark.log`.
+The uc_version export annotation was preserved when positioning the new API;
+corrected patch reapplication/build passes (`target/jit-fast-read-export-build.log`).
+
+Raw-helper diagnostic game reached the terms screen (driver click813 s) and
+main menu (click843 s); stopped at904 s before a playable level. No compiler
+failures in 144 million compiled dispatches. This included builds/profiles and
+is not an isolated startup trial. Logs `target/jit-raw-step-{game,driver}.log`.
+Later sample at ~750 s still shows memory helpers/TCI fallback dominating,
+with 24% idle samples (`target/jit-raw-step-late-profile/summary.json`).
+
+Fast-read diagnostic build (`TOUCHHLE_WEB_DEBUG=1 node web/build-runtime.mjs`)
+completed. New 3,600 s inspector run enables DIAGNOSTICS=1 and
+INSPECTION_OPTIONS='com.autodesk.tinkerbox: --print-fps'; the guest loader confirms
+that standard option was applied. Files stay local under target/browser-jit-fast-read/.
+This is a diagnostic/gameplay run, not a release timing trial.
