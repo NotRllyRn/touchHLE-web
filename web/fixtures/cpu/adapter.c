@@ -69,6 +69,20 @@ void adapter_checks(void) {
   regs[15] = 0x1000; ticks = 19;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x24);
   assert(ticks == 16 && regs[0] == 43 && regs[15] == 0x1008);
+  // A page boundary splits Thumb IT from its conditional instruction. Budget
+  // return must preserve the pending IT state before that next block executes.
+  uint16_t *halves = (uint16_t *)code;
+  halves[2047] = 0xbf08; halves[2048] = 0x202a; halves[2049] = 0xdf42;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 8192);
+  for (unsigned equal = 0; equal < 2; ++equal) {
+    touchHLE_DynarmicWrapper_set_cpsr(cpu, 0x30 | (equal ? 0x40000000 : 0));
+    regs[0] = 7; regs[15] = 0x1ffe; ticks = 1;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -1);
+    assert(ticks == 0 && regs[15] == 0x2000 && regs[0] == 7);
+    ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(regs[0] == (equal ? 42 : 7) && regs[15] == 0x2004);
+  }
   // A tiny abstract budget may overshoot by one translated block, but must
   // terminate even in a long-block infinite loop and saturate at zero ticks.
   for (unsigned i = 0; i < 512; i++) code[i] = 0xe2800001;

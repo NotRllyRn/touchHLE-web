@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
+execFileSync(process.execPath, ['web/patch-unicorn.mjs'], { cwd: root, stdio: 'inherit' });
 const source = `${root}target/unicorn.js`;
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim();
 if (revision !== 'fdfcc4fd5e7d4ceeebe6b4d65b19eea4aa655e5d') throw new Error('Expected Unicorn.js v2.1.4 source revision');

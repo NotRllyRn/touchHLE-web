@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
+execFileSync(process.execPath, ['web/patch-unicorn.mjs'], { cwd: root, stdio: 'inherit' });
 execFileSync('emcc', ['web/fixtures/cpu/benchmark.c', process.env.CPU_ADAPTER || 'src/web/cpu.c',
   'target/unicorn.js/unicorn/build-wasm-eh/libunicorn.a',
   '-Itarget/unicorn.js/unicorn/include', '-O2', '-sSUPPORT_LONGJMP=wasm',

@@ -100,3 +100,13 @@ observed churn, with emitted-code cap still16 MiB. Fresh game validation underwa
 Prior diagnostic run completed first simulation and Lesson2 placement, but not
 Lesson2 SUCCESS; only0.5–3 FPS. M3/M4/M5 and the goal remain open. Exact tests,
 failures, measurements and next steps are recorded in ../browser.md.
+
+Scheduler/store run reaches terms by292 s and main menu by322 s with~3–4 menu
+FPS, still far from acceptance. Profile identifies budget-stop unwinding at21%
+of samples. Normal block-boundary budget returns pass rebuilt Node/Chromium
+CPU/fibers, including a new Thumb IT boundary/resume regression. Long arithmetic
+median13.116→11.525 ms; memory gains are mixed. Initial stale-archive checks are
+explicitly excluded and build scripts now ensure Unicorn rebuilds before linking.
+Full runtime/HLE verification pending; the diagnostic game continues on prior code.
+Normal budget return full build, HLE mipmap twice, JS17, formatting and patch
+roundtrip pass. Game-level speed and correctness on this change remain pending.

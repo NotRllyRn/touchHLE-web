@@ -1516,3 +1516,45 @@ without simultaneous builds/benchmarks (`target/jit-scheduler-game.log`). Physic
 phones/tablets and other browser engines remain untested. Next: validate both
 training successes and measure startup, frame rate and simulation pace, then
 profile the remaining bottleneck separately from timing runs.
+
+### Normal instruction-budget returns (2026-10-26)
+
+The scheduler/store/cache game run showed terms by screenshot292 s and main
+menu by322 s (driver sampling, not precise transition timestamps). Menu reports
+~3–4 FPS. These observations precede profiling/builds, but are one headless
+Chromium run, not the required three acceptance trials. The run then became
+explicitly diagnostic: `target/jit-scheduler-menu-profile/summary.json` has13,607
+samples, 3,974 in TCI interpreter/helper dispatch, 2,955 generated Wasm, 2,890
+in `__wasm_longjmp`, 1,014 in exit-request helper and only68 idle. Stack inspection
+attributes the unwind cost to `touchhle_budget_stop`.
+
+The adapter budget branch already synchronizes PC before executing any guest
+instruction in the next block. It now calls uc_emu_stop then emits exit_tb,
+returning normally through cpu_tb_exec's unlock and cpu_exec's stop handling.
+Actual faults and other exceptional paths retain existing unwinding. Added a
+Thumb IT test split across a4 KiB page boundary: exhaust budget after IT, verify
+unexecuted PC/registers, resume with both true/false predicates. This specifically
+checks pending conditional state across a budget return.
+
+Validation correction: initial `jit-budget-return-*` and `jit-budget-it-*` tests
+and the first benchmark linked the old Unicorn archive. Those results establish
+only baseline fixture behavior, not this implementation. After explicit
+`node web/patch-unicorn.mjs`, CPU interpreter/JIT Node and Chromium/fibers pass
+(`target/jit-budget-return-rebuilt-{build,node,browser}.log`). Shared CPU, benchmark
+and full-runtime builders now run the patch/build step themselves to prevent
+stale archives. No failed or stale test is treated as implementation evidence.
+
+Isolated five-trial Asyncify medians after rebuilding
+(`target/jit-budget-return-rebuilt-benchmark.log`), interpreter/JIT ms:
+tiny66.545/10.774, medium92.217/9.473, long302.847/11.525,
+code-page memory140.961/77.297, separate-data memory101.553/32.351,
+SVC220.931/173.699. Previous long JIT13.116 ms; memory changes are small/mixed.
+The owned diagnostic browser was suspended/resumed in finally for20.347 s during
+the stale-archive benchmark and21.139 s during the rebuilt benchmark. Its remaining
+wall-clock game timings are not acceptance data. Full runtime rebuild and HLE
+regressions are pending; the active game retains the previous loaded build.
+
+Normal-budget-return full runtime build completed. Forced-JIT HLE mipmap passes
+twice with GET-only static traffic; all17 JS tests pass
+(`target/jit-budget-return-{runtime-build,mipmap,js}.log`). Formatting/diff and
+patch reverse/reapply checks pass (existing EOF whitespace warning unchanged).

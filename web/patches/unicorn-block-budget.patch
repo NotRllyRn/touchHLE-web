@@ -45,7 +45,7 @@
 +#endif
 --- a/qemu/accel/tcg/tcg-runtime.c
 +++ b/qemu/accel/tcg/tcg-runtime.c
-@@ -185,4 +185,11 @@
+@@ -185,4 +185,10 @@
              cpu_loop_exit_restore(uc->cpu, GETPC());
          }
      }
@@ -56,7 +56,6 @@
 +void HELPER(touchhle_budget_stop)(void *p)
 +{
 +    uc_emu_stop(p);
-+    HELPER(check_exit_request)(p, 0);
 +}
 +#endif
 --- a/qemu/accel/tcg/translator.c
@@ -71,7 +70,7 @@
  
      /* Initialize DisasContext */
      db->tb = tb;
-@@ -81,6 +84,32 @@
+@@ -81,6 +84,35 @@
      }
  
      // tcg_dump_ops(tcg_ctx, false, "translator loop");
@@ -90,6 +89,9 @@
 +        TCGv_ptr engine = tcg_const_ptr(tcg_ctx, uc);
 +        gen_helper_touchhle_budget_stop(tcg_ctx, engine);
 +        tcg_temp_free_ptr(tcg_ctx, engine);
++        // pc_sync above already describes this unexecuted block. Return
++        // normally so cpu_exec handles the stop without a Wasm longjmp.
++        tcg_gen_exit_tb(tcg_ctx, NULL, 0);
 +        gen_set_label(tcg_ctx, ready);
 +        TCGv_i32 count = tcg_const_i32(tcg_ctx, 0);
 +        touchhle_budget_op = tcg_last_op(tcg_ctx);
@@ -104,7 +106,7 @@
  
      /* Start translating.  */
      gen_tb_start(tcg_ctx, db->tb);
-@@ -148,6 +177,9 @@
+@@ -148,6 +180,9 @@
      db->tb->size = db->pc_next - db->pc_first;
      db->tb->icount = db->num_insns;
  

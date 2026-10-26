@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, copyFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
+execFileSync(process.execPath, ['web/patch-unicorn.mjs'], { cwd: root, stdio: 'inherit' });
 execFileSync(process.execPath, ['web/patch-emscripten.mjs'], { cwd: root, stdio: 'inherit' });
 const env = { ...process.env, TOUCHHLE_UNICORN_SOURCE: `${root}target/unicorn.js`, RUSTFLAGS: '-C panic=abort' };
 for (const [directory, expected] of [
