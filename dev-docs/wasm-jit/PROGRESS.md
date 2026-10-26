@@ -279,3 +279,8 @@ Partial eviction: cache-pressure medians3.593/4.375/3.709 s;12288 vs16384
 compiles (25% fewer). Ordinary CPU medians broadly stable after warmup. All nine
 graphics fixtures twice pass. Retain pending real-game loading/two-lesson checks;
 synthetic recency does not include native C-cache hits. M4/M5 remain open.
+
+Partial-cache101e15f0 pushed; fresh clean game running. Read-only disassembly
+confirms Asyncify restore/check code in CPU/translation/helpers and stronger
+production assertions than standalone microbenchmarks. Next measure checking/
+instrumentation overhead before changing flags; no exclusions accepted yet.

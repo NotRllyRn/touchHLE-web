@@ -2266,3 +2266,16 @@ Static build and all nine forced-JIT graphics fixtures each pass twice. No C/Rus
 production change required a runtime relink; the worker imports the updated
 compiler independently. Retain pending fresh game timing/correctness.
 `target/jit-partial-cache-web-build.log` and graphics logs. Acceptance stays open.
+
+Read-only runtime disassembly identifies a further performance question. The
+current full runtime uses ASSERTIONS=2 and STACK_OVERFLOW_CHECK=2, while the
+standalone CPU benchmark uses default assertions. Asyncify restore prologues
+remain in touchhle_tci_call, touchhle_tci_interpret, cpu_exec_arm, tb_gen_code_arm
+and float32_add_arm. State-global read counts in their disassembled bodies are
+5,202,133,539,7 respectively (not execution frequencies). The explicitly removed
+dispatcher has state-preservation assertions as well. Artifacts:
+`target/jit-runtime-asyncify.wat`, `target/jit-asyncify-functions.json`.
+These observations do not establish the cost or justify broad exclusions yet.
+Next compare production checking overhead and investigate synchronous CPU helper
+boundaries, retaining real Rust/HLE yielding and strict regression fixtures.
+No assertion/Asyncify setting has been changed by this diagnostic.
