@@ -1,0 +1,31 @@
+--- a/qemu/include/exec/gen-icount.h
++++ b/qemu/include/exec/gen-icount.h
+@@ -32,6 +32,18 @@
+ 
+ static inline void gen_tb_start(TCGContext *tcg_ctx, TranslationBlock *tb)
+ {
++#ifdef __EMSCRIPTEN__
++    // Common path: no exit request. Keep the existing helper for actual exits,
++    // including its delay-slot, PC restoration and longjmp semantics.
++    TCGLabel *running = gen_new_label(tcg_ctx);
++    TCGv_ptr counter = tcg_const_ptr(tcg_ctx,
++        &cpu_neg(tcg_ctx->uc->cpu)->icount_decr.u32);
++    TCGv_i32 request = tcg_temp_new_i32(tcg_ctx);
++    tcg_gen_ld_i32(tcg_ctx, request, counter, 0);
++    tcg_temp_free_ptr(tcg_ctx, counter);
++    tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_GE, request, 0, running);
++    tcg_temp_free_i32(tcg_ctx, request);
++#endif
+     TCGv_ptr puc = tcg_const_ptr(tcg_ctx, tcg_ctx->uc);
+     TCGv_i32 tmp = tcg_const_i32(tcg_ctx, 0);
+     // Unicorn:
+@@ -43,6 +55,9 @@
+     gen_helper_check_exit_request(tcg_ctx, puc, tmp);
+     tcg_temp_free_i32(tcg_ctx, tmp);
+     tcg_temp_free_ptr(tcg_ctx, puc);
++#ifdef __EMSCRIPTEN__
++    gen_set_label(tcg_ctx, running);
++#endif
+ }
+ 
+ static inline void gen_tb_end(TCGContext *tcg_ctx, TranslationBlock *tb, int num_insns)

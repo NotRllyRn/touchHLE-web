@@ -13,7 +13,7 @@ for (const [cwd, expected] of [
   if (revision !== expected) throw new Error(`Unexpected revision in ${cwd}: ${revision}`);
 }
 const cwd = `${source}/unicorn`;
-for (const name of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch', 'unicorn-tci-jit.patch']) {
+for (const name of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch', 'unicorn-tci-jit.patch', 'unicorn-block-budget.patch', 'unicorn-exit-check.patch']) {
   const patch = `${root}web/patches/${name}`;
   const applied = spawnSync('git', ['apply', '--reverse', '--check', patch], { cwd });
   if (applied.status !== 0) {

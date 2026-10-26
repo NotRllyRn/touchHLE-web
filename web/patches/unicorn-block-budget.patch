@@ -1,0 +1,116 @@
+--- a/include/uc_priv.h
++++ b/include/uc_priv.h
+@@ -366,6 +366,10 @@
+     // hook to count number of instructions for uc_emu_start()
+     uc_hook count_hook;
+ 
++#ifdef __EMSCRIPTEN__
++    int32_t touchhle_budget;
++    bool touchhle_budget_adapter, touchhle_budget_active;
++#endif
+     size_t emu_counter; // current counter of uc_emu_start()
+     size_t emu_count;   // save counter of uc_emu_start()
+ 
+--- a/uc.c
++++ b/uc.c
+@@ -3075,3 +3075,17 @@
+             (double)(end - tracer->starts[loc]) / (double)(1000));
+ }
+ #endif
++
++#ifdef __EMSCRIPTEN__
++UNICORN_EXPORT void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining)
++{
++    uc->touchhle_budget_adapter = true;
++    uc->touchhle_budget_active = remaining >= 0;
++    uc->touchhle_budget = remaining;
++}
++UNICORN_EXPORT int32_t touchHLE_uc_remaining(uc_engine *uc)
++{
++    return uc->touchhle_budget;
++}
++#endif
++
+--- a/qemu/accel/tcg/tcg-runtime.h
++++ b/qemu/accel/tcg/tcg-runtime.h
+@@ -260,4 +260,7 @@
+ 
+ DEF_HELPER_FLAGS_5(gvec_bitsel, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, ptr, i32)
+ 
+-DEF_HELPER_2(check_exit_request, void, ptr, i32)
+\ No newline at end of file
++DEF_HELPER_2(check_exit_request, void, ptr, i32)
++#ifdef __EMSCRIPTEN__
++DEF_HELPER_1(touchhle_budget_stop, void, ptr)
++#endif
+--- a/qemu/accel/tcg/tcg-runtime.c
++++ b/qemu/accel/tcg/tcg-runtime.c
+@@ -185,4 +185,11 @@
+             cpu_loop_exit_restore(uc->cpu, GETPC());
+         }
+     }
+-}
+\ No newline at end of file
++}
++#ifdef __EMSCRIPTEN__
++void HELPER(touchhle_budget_stop)(void *p)
++{
++    uc_emu_stop(p);
++    HELPER(check_exit_request)(p, 0);
++}
++#endif
+--- a/qemu/accel/tcg/translator.c
++++ b/qemu/accel/tcg/translator.c
+@@ -40,6 +40,9 @@
+     TCGContext *tcg_ctx = uc->tcg_ctx;
+     TCGOp *prev_op = NULL;
+     bool block_hook = false;
++#ifdef __EMSCRIPTEN__
++    TCGOp *touchhle_budget_op = NULL;
++#endif
+ 
+     /* Initialize DisasContext */
+     db->tb = tb;
+@@ -81,6 +84,32 @@
+     }
+ 
+     // tcg_dump_ops(tcg_ctx, false, "translator loop");
++
++#ifdef __EMSCRIPTEN__
++    if (uc->touchhle_budget_adapter && uc->touchhle_budget_active) {
++        // Charge one translated block directly, without a tracing callback.
++        // Stepping mode flushes translations and retains Unicorn's exact hook.
++        ops->pc_sync(db, cpu);
++        TCGLabel *ready = gen_new_label(tcg_ctx);
++        TCGv_i32 left = tcg_temp_local_new_i32(tcg_ctx);
++        TCGv_ptr address = tcg_const_ptr(tcg_ctx, &uc->touchhle_budget);
++        tcg_gen_ld_i32(tcg_ctx, left, address, 0);
++        tcg_temp_free_ptr(tcg_ctx, address);
++        tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_GT, left, 0, ready);
++        TCGv_ptr engine = tcg_const_ptr(tcg_ctx, uc);
++        gen_helper_touchhle_budget_stop(tcg_ctx, engine);
++        tcg_temp_free_ptr(tcg_ctx, engine);
++        gen_set_label(tcg_ctx, ready);
++        TCGv_i32 count = tcg_const_i32(tcg_ctx, 0);
++        touchhle_budget_op = tcg_last_op(tcg_ctx);
++        tcg_gen_sub_i32(tcg_ctx, left, left, count);
++        tcg_temp_free_i32(tcg_ctx, count);
++        address = tcg_const_ptr(tcg_ctx, &uc->touchhle_budget);
++        tcg_gen_st_i32(tcg_ctx, left, address, 0);
++        tcg_temp_free_ptr(tcg_ctx, address);
++        tcg_temp_free_i32(tcg_ctx, left);
++    }
++#endif
+ 
+     /* Start translating.  */
+     gen_tb_start(tcg_ctx, db->tb);
+@@ -148,6 +177,9 @@
+     db->tb->size = db->pc_next - db->pc_first;
+     db->tb->icount = db->num_insns;
+ 
++#ifdef __EMSCRIPTEN__
++    if (touchhle_budget_op) touchhle_budget_op->args[1] = db->num_insns;
++#endif
+     hooked_regions_check(uc, db->tb->pc, db->tb->size);
+ 
+     if (block_hook) {

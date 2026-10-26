@@ -54,8 +54,8 @@ void adapter_checks(void) {
   regs[15] = 0x1000; ticks = 100;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x23);
   assert(ticks == 98 && regs[0] == 5007 && regs[15] == 0x1004);
-  // Mixed-width Thumb charges halfwords conservatively, but stepping a wide
-  // instruction must still execute exactly one instruction.
+  // Mixed-width Thumb charges guest instructions, including one tick for a
+  // wide instruction. Debugger stepping must also execute exactly one.
   const uint16_t wide[] = {0xf240, 0x002a, 0x3001, 0xdf24}; // movw; add; svc
   memcpy(code, wide, sizeof(wide));
   touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
@@ -64,7 +64,7 @@ void adapter_checks(void) {
   assert(regs[0] == 42 && regs[15] == 0x1004);
   regs[15] = 0x1000; ticks = 19;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x24);
-  assert(ticks == 15 && regs[0] == 43 && regs[15] == 0x1008);
+  assert(ticks == 16 && regs[0] == 43 && regs[15] == 0x1008);
   // A tiny abstract budget may overshoot by one translated block, but must
   // terminate even in a long-block infinite loop and saturate at zero ticks.
   for (unsigned i = 0; i < 512; i++) code[i] = 0xe2800001;

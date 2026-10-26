@@ -8,29 +8,14 @@
 #include <string.h>
 #include <stdio.h>
 typedef struct { uint32_t regs[16], extregs[64], cpsr, fpscr; } Context;
-typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; size_t budget; int stepping; int vectors_loaded; void *reg_values[16]; } Cpu;
+typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; int stepping; int vectors_loaded; void *reg_values[16]; } Cpu;
 extern void touchHLE_web_map_memory(void *mem, Cpu *cpu);
 extern size_t touchHLE_uc_executed(uc_engine *uc);
+extern void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining);
+extern int32_t touchHLE_uc_remaining(uc_engine *uc);
 static const int registers[] = {UC_ARM_REG_R0,UC_ARM_REG_R1,UC_ARM_REG_R2,UC_ARM_REG_R3,
  UC_ARM_REG_R4,UC_ARM_REG_R5,UC_ARM_REG_R6,UC_ARM_REG_R7,UC_ARM_REG_R8,UC_ARM_REG_R9,
  UC_ARM_REG_R10,UC_ARM_REG_R11,UC_ARM_REG_R12,UC_ARM_REG_SP,UC_ARM_REG_LR,UC_ARM_REG_PC};
-static void block(uc_engine *uc, uint64_t address, uint32_t size, void *user) {
-  (void)address;
-  Cpu *cpu = user;
-  if (cpu->stepping) return;
-  if (cpu->executed >= cpu->budget) {
-    uc_emu_stop(uc);
-    return;
-  }
-  // The adapter ABI defines ticks as an abstract time budget, as on native
-  // Dynarmic. Charge a translated block before executing it; at most one
-  // block can overshoot. Thumb-2 instructions conservatively cost two ticks.
-  // Single stepping still uses Unicorn's exact instruction-count mechanism.
-  uint32_t cpsr;
-  assert(uc_reg_read(uc, UC_ARM_REG_CPSR, &cpsr) == UC_ERR_OK);
-  unsigned ticks = size / ((cpsr & 0x20) ? 2 : 4);
-  cpu->executed += ticks ? ticks : 1;
-}
 static bool invalid_memory(uc_engine *uc, uc_mem_type type, uint64_t address,
                            int size, int64_t value, void *user) {
   (void)value; (void)user;
@@ -61,7 +46,6 @@ Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
   assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPEXC, &fpexc) == UC_ERR_OK);
   uc_hook hook;
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_INTR, interrupt, cpu, 1, 0) == UC_ERR_OK);
-  assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_BLOCK, block, cpu, 1, 0) == UC_ERR_OK);
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_MEM_INVALID, invalid_memory, cpu, 1, 0) == UC_ERR_OK);
   for (int i = 0; i < 16; ++i) cpu->reg_values[i] = &cpu->context.regs[i];
   cpu->context.cpsr = 0x10;
@@ -102,13 +86,14 @@ int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *cpu, void *mem, uint64_t *tick
   if (!budget) return -1;
   cpu->result = -1;
   cpu->executed = 0;
-  cpu->budget = budget;
+  touchHLE_uc_set_budget(cpu->uc, ticks ? (int32_t)budget : -1);
   // Unicorn's count hook is compiled into translated blocks. A block cached
   // during normal execution cannot provide exact stepping without a flush.
   if (cpu->stepping != !ticks) assert(uc_ctl_flush_tb(cpu->uc) == UC_ERR_OK);
   cpu->stepping = !ticks;
   uc_err error = uc_emu_start(cpu->uc, c->regs[15] | ((c->cpsr & 0x20) ? 1 : 0), 0, 0, ticks ? 0 : 1);
   if (!ticks) cpu->executed = touchHLE_uc_executed(cpu->uc);
+  else cpu->executed = (int64_t)budget - touchHLE_uc_remaining(cpu->uc);
   if (ticks) *ticks -= cpu->executed > budget ? budget : cpu->executed;
   assert(uc_reg_read_batch(cpu->uc, registers, cpu->reg_values, 16) == UC_ERR_OK);
   assert(uc_reg_read(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
