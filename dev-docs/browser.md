@@ -2463,3 +2463,27 @@ Static build and nine forced-JIT graphics fixtures each pass twice, formatting/
 diff pass. Logs `target/jit-temp-liveness-{web-build,MIPMAP,COMBINE,LIGHTING,
 LIGHT_ATTENUATION,LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log`.
 Retain pending clean game measurement and both lessons; no real-time claim.
+
+Temporary-transfer clean game reached terms132 s and menu162 s; training input
+238 s, Play447 s (matched screenshot442 s), selection-to-Play209 s versus219 s
+previously. One screenshot interval earlier is suggestive but insufficient to
+claim a material/statistically established gain. Approximately3.3 FPS persists.
+No competing build/test/profile before Play. Logs `target/jit-temp-liveness-
+{game,driver}.log`; screenshots `target/browser-jit-temp-liveness/`. Both lessons
+are being verified. Startup and real-time targets remain unmet.
+
+Both temporary-transfer lessons pass: SUCCESS canvas-523.png and canvas-734.png
+in `target/browser-jit-temp-liveness/`; actual touch placement is visible in
+lesson2-placed.png. Deliberately stopped through UI afterward; inspector exit1
+is manual Stop. Retain68577f3a; game targets remain unmet.
+
+Phase-matched diagnostics (5.3 s after Play each): prior helper build at462.3 s
+compiled23140 modules/53654742 emitted bytes/20296.2 ms compile time/6 evictions;
+new at452.3 s compiled21034/42539532 bytes/16949.0 ms/3 evictions. Both have
+~409 million compiled dispatches and ~368.5k registrations. These single-run
+cumulative counters show fewer compilations and bytes, not gameplay acceptance.
+All clean timing/correctness artifacts remain local; no game data committed.
+
+Next local-only measurement compares CPU benchmark link optimization O2/O3
+with the same production assertions, stack checks and Asyncify exclusions.
+No production optimization flag changed. Game stopped before benchmarking.

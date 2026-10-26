@@ -320,3 +320,10 @@ actual Node/Chromium CPU/cache/fibers and nine graphics fixtures twice. Linked
 ARM loop108/135/108 ms new/old/new (~20% less), emitted benchmark code25.4%
 smaller. Native/dispatcher unchanged. Fresh game timing and both lessons next;
 M4/M5 remain open and synthetic improvements are not acceptance.
+
+Temporary-transfer clean game: menu162 s, training238 to Play447 =209 s,
+~3.3 FPS. Both lessons SUCCESS523/734 s. The10 s loading difference is only
+one screenshot interval; no statistical acceptance. At matched Play+5.3 s,
+~21% fewer emitted bytes, ~16% less compilation time and3 vs6 evictions.
+Retain68577f3a after regressions/game checks. Next compare O2/O3 CPU linking
+without changing production flags. M4/M5 remain open.
