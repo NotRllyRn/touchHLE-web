@@ -73,3 +73,13 @@ Same-block linked loops remain inside their generated Wasm function, preserving
 TCI temporaries in locals. Read the mutable target on every backedge; other targets
 return through the existing dispatcher. Every iteration retains budget/exit
 checks and self-modifying-code invalidation. No cross-block trace construction.
+
+## Integer state across HLE calls
+
+The browser-only Unicorn adapter exposes its initialized engine's live integer
+register array for the existing Rust CPU ABI. Context swaps still copy complete
+integer state; CPSR uses Unicorn's API. Preserve integer state around CPSR writes
+because ARM mode switches bank r8-r14. VFP retains its lazy context transfer.
+This removes per-register API dispatch without changing native Dynarmic or the
+Rust call boundary. Mode-bank, context, stepping and exception regressions gate
+the change; HLE-transition benchmarks measure its intended benefit.

@@ -1708,3 +1708,55 @@ postTask full runtime rebuild completed successfully. Nine forced-JIT graphics
 fixtures pass twice, actual audio passes, JS20 pass
 (`target/jit-post-task-{runtime-build,TEST_*,audio,js}.log`). Formatting/diff pass.
 Next is a clean game run combining same-block loops and ordinary browser tasks.
+
+### Combined loop/scheduler game run and register experiment (2026-10-26)
+
+On c39e2a6a, Chromium141/Linux x86_64 software rendering, the fresh TinkerBox
+run reached terms182 s, menu212 s, training input295 s, and first Play616 s
+(playable screenshot match612 s). Selection-to-Play321 s includes the image
+driver's sampling delay. Normal gameplay remained about3 FPS: no material
+startup gain versus a03e0005. Lesson1 completed; Lesson2 pinch/tray/ball placement
+was visible at1794 s. Second Play arrived1799 s, too late for this1803 s run to
+verify Lesson2 SUCCESS. Do not count this as a second-lesson regression pass.
+Log: `target/jit-loops-tasks-game.log`; screenshots stay local.
+
+Diagnostic graphics probes (not acceptance tests): all WebGL calls consumed
+827 ms/15 s, including getParameter460 ms and getTexParameter201 ms. Eight
+software-GPU threads each used about45% CPU. Temporarily suppressing draws gave
+6.285 presents/s; suppressing draw/clear/blit after finish gave10.43 presents/s
+and removed much of the idle time. These runs do not render working gameplay.
+Original methods were restored. No hardware GPU is exposed in this container.
+Logs: `target/jit-loops-tasks-gl-all.log`, `target/jit-loops-tasks-threads.log`;
+profile: `target/jit-no-raster-profile/summary.json`.
+
+The profile also identified integer register API overhead across HLE calls.
+An experimental adapter exposes Unicorn's live integer array. The initial
+mode-banking regression FAILED: CPSR changes clobbered supplied r8-r14.
+Preserving/restoring the16-register array around CPSR writes fixes this while
+removing the per-register API loop. Actual Node and Chromium CPU/fiber suites
+now pass, including supervisor/FIQ/user mode transitions, ARM/Thumb/VFP,
+faults, budget and cache checks. Logs: `target/jit-live-regs-bank-node.log`
+(failure), `target/jit-live-regs-fixed-{build,node,browser}.log` (fixed).
+Benchmark and full runtime verification are pending; this is not yet accepted.
+
+Live-register comparison, Node22.22.3 with Asyncify and no concurrent game/build:
+5 trials/case, new/old/new medians (ms): tiny5.413/4.774/4.087,
+medium4.601/4.528/4.748, long7.517/6.255/5.230, code-page memory
+53.211/50.564/51.057, data-memory7.031/6.732/5.964, and50000 SVC calls
+124.594/181.047/112.885. The transition workload improves31–38%; other
+workloads show warmup/noise, not an established gain. Both adapters use the
+same newly built Unicorn archive; each module receives its own exact Wasm
+binary. Logs: `target/jit-live-regs-{old-bench,new-bench,comparison}.log`.
+Eight-patch reverse/reapply byte comparison passes (existing budget-patch EOF
+blank-line warning remains). Rust formatting, diff whitespace and JS20 pass.
+Full runtime build and HLE checks remain in progress.
+
+Live-register full runtime build succeeds (`target/jit-live-regs-runtime-build.log`),
+including web assets. Forced JIT threshold1 actual HLE graphics fixtures MIPMAP,
+COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED, POINT_PARAMETERS
+and PRESENT_BUFFERS each pass twice with static GET-only traffic, Chromium141.
+Actual Web Audio passes. Logs: `target/jit-live-regs-TEST_*.log` and
+`target/jit-live-regs-audio.log`. Native source paths are unchanged; prior native33
+and browser Rust9 tests remain the reference. Retain the register optimization
+for its measured transition benefit. Fresh TinkerBox timing/gameplay pending;
+M4/M5 and the thread goal remain open.

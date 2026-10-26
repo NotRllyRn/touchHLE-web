@@ -148,3 +148,16 @@ and MessageChannel fallback paths. All six2000-yield trials receive input after
 the first yield; preferred ping0.4–0.7 ms, fallback0.4–1.1 ms. Full rebuild pending.
 postTask full runtime, nine graphics fixtures twice, audio and JS20 pass. Next:
 clean combined self-loop/postTask game timing, then profile remaining cost.
+
+Combined c39e2a6a game: menu212 s, training-to-Play321 s, ~3 FPS. Lesson1
+complete; Lesson2 placement visible, but second Play1799 s left insufficient
+time to verify SUCCESS. M4/M5 remain open. Software GPU/raster suppression
+diagnosis and a live-register experiment are recorded in browser.md. The new
+mode-banking regression caught a bug; preservation around CPSR writes now
+passes actual Node/Chromium CPU/fibers. Benchmark/full-runtime checks pending.
+
+Live-register adapter retained: alternating new/old/new50000-SVC medians
+124.594/181.047/112.885 ms (31–38% reduction). Eight patches roundtrip,
+Node/Chromium CPU/fibers, JS20, formatting/diff, full runtime, nine HLE graphics
+fixtures twice and actual audio pass. No native-path changes. Fresh TinkerBox
+loading/gameplay measurement is next; no game-speed improvement claimed yet.

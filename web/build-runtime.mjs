@@ -13,7 +13,7 @@ for (const [directory, expected] of [
   const actual = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: `${root}${directory}`, encoding: 'utf8' }).trim();
   if (actual !== expected) throw new Error(`Unexpected Unicorn source revision: ${actual}`);
 }
-for (const patch of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch', 'unicorn-tci-jit.patch', 'unicorn-block-budget.patch', 'unicorn-exit-check.patch', 'unicorn-adapter-read.patch']) {
+for (const patch of ['unicorn-tci-temp-limit.patch', 'unicorn-instruction-count.patch', 'unicorn-svc-return.patch', 'unicorn-tci-jit.patch', 'unicorn-block-budget.patch', 'unicorn-exit-check.patch', 'unicorn-adapter-read.patch', 'unicorn-adapter-registers.patch']) {
   execFileSync('git', ['apply', '--reverse', '--check', `${root}web/patches/${patch}`],
     { cwd: `${root}target/unicorn.js/unicorn`, stdio: 'inherit' });
 }

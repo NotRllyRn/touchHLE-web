@@ -205,6 +205,18 @@ void adapter_checks(void) {
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
     assert(regs[0] == (half ? 0xffff8001 : 0xfffffffe));
   }
+  // CPSR mode changes bank r8-r14. The adapter's supplied register state must
+  // remain authoritative, as with the original write-CPSR-then-write-registers ABI.
+  code[0] = 0xef000042;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  const uint32_t modes[] = {0x13, 0x11, 0x10}; // supervisor, FIQ, user
+  for (unsigned mode = 0; mode < 3; ++mode) {
+    touchHLE_DynarmicWrapper_set_cpsr(cpu, modes[mode]);
+    for (unsigned r = 8; r < 15; ++r) regs[r] = 0x12340000 + mode * 16 + r;
+    regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    for (unsigned r = 8; r < 15; ++r) assert(regs[r] == 0x12340000 + mode * 16 + r);
+  }
   touchHLE_DynarmicWrapper_delete(cpu);
   free(code);
 }

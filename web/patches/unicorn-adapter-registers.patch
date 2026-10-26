@@ -1,0 +1,18 @@
+--- a/qemu/target/arm/unicorn_arm.c
++++ b/qemu/target/arm/unicorn_arm.c
+@@ -14,6 +14,15 @@
+ #include "inttypes.h"
+ 
+ ARMCPU *cpu_arm_init(struct uc_struct *uc);
++
++#ifdef __EMSCRIPTEN__
++// Adapter-only live integer state. The initialized engine owns this array until
++// close; PC/CPSR synchronization still goes through the normal execution entry.
++UNICORN_EXPORT uint32_t *touchHLE_uc_arm_regs(uc_engine *uc)
++{
++    return ((CPUARMState *)uc->cpu->env_ptr)->regs;
++}
++#endif
+ 
+ static void arm_set_pc(struct uc_struct *uc, uint64_t address)
+ {
