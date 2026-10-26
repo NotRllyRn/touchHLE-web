@@ -6,7 +6,7 @@ import '../tci-jit.js';
 const names = ['movi_i32', 'mov_i32', 'add_i32', 'sub_i32', 'mul_i32', 'shl_i32',
   'sar_i32', 'shr_i32', 'rotl_i32', 'rotr_i32', 'setcond_i32', 'brcond_i32',
   'exit_tb', 'goto_tb', 'add2_i32', 'sub2_i32', 'mulu2_i32', 'setcond2_i32',
-  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32', 'call'];
+  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32', 'call', 'qemu_ld_i64'];
 const word = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, n >>> 24];
 const imm = n => [255, ...word(n)];
 const op = (name, ...args) => [names.indexOf(name), args.length + 2, ...args];
@@ -159,6 +159,38 @@ test('inline fixed-region reads preserve bounds, fallback, engine identity and m
     view().setUint32(0, 4128, true); // another CPU, same compiled function
     mapping(0x2000); f.regs()[0] = 0x2000; f.run();
     assert.equal(f.regs()[3], [2, 0x12, 0x22, 0x72].includes(memop) ? 0x11223344 : 12345);
+  }
+});
+
+test('inline doubleword reads preserve both halves, bounds and fallback', () => {
+  for (const memop of [3, 0x13, 0x23, 0x33, 0x73, 0x43, 11, 2, 6]) {
+    let calls = 0;
+    const f = fixture([...op('qemu_ld_i64', 0, 1, 0, ...word(memop << 4)), ...exit()],
+      (_env, regs) => {
+        calls++;
+        const r = new Uint32Array(f.memory.buffer, regs, 16);
+        r[0] = 0x11223344; r[1] = 0x89abcdef;
+        return 0;
+      }, {counter:96,clear(){},readLayout:[0,0,8,16]});
+    const view = () => new DataView(f.memory.buffer);
+    view().setUint32(0,4096,true);
+    const expected = 0xffeeddccbbaa9988n;
+    for (const base of [0x1000,0xfffff000]) {
+      const slot = (base >>> 31) * 4;
+      view().setUint32(4096+slot,base,true);
+      view().setUint32(4112+slot,8192,true);
+      for (const size of [0,7,16]) for (const offset of [0,8,4,12,16,-8]) {
+        view().setUint32(4104+slot,size,true);
+        view().setBigUint64(8192,expected,true); view().setBigUint64(8200,expected,true);
+        f.regs()[0] = (base+offset) >>> 0;
+        const previous = calls; f.run();
+        const fast = [3,0x13,0x23,0x33,0x73].includes(memop) && size === 16 && [0,8].includes(offset);
+        assert.equal(calls-previous,fast ? 0 : 1);
+        assert.equal(f.regs()[0],fast ? 0xbbaa9988 : 0x11223344);
+        assert.equal(f.regs()[1],fast ? 0xffeeddcc : 0x89abcdef);
+      }
+      f.memory.grow(1);
+    }
   }
 });
 

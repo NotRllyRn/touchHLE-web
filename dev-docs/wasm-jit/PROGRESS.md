@@ -161,3 +161,14 @@ Live-register adapter retained: alternating new/old/new50000-SVC medians
 Node/Chromium CPU/fibers, JS20, formatting/diff, full runtime, nine HLE graphics
 fixtures twice and actual audio pass. No native-path changes. Fresh TinkerBox
 loading/gameplay measurement is next; no game-speed improvement claimed yet.
+
+Live-register fresh game: menu match202 s, training288 s to Play598 s (310 s);
+~3.2 FPS before Play. Lesson1 SUCCESS verified at728 s; later diagnostic work
+changes timing. Bounded64-bit load experiment passes JS21 and actual Node/
+Chromium CPU/fibers, including VFP payload and cross-boundary fault tests.
+Same-Wasm enabled/disabled/enabled doubleword medians5.385/30.294/4.654 ms.
+Graphics matrix pending. M4/M5 remain open.
+
+Doubleword compiler graphics matrix passes twice with forced threshold1;
+formatting/diff pass. Retain the small extension; game performance on it remains
+pending. Existing live-register game reaches Lesson2 and accepts pinch.

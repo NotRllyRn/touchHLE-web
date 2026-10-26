@@ -205,6 +205,22 @@ void adapter_checks(void) {
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
     assert(regs[0] == (half ? 0xffff8001 : 0xfffffffe));
   }
+  // Doubleword VFP loads preserve all bits, including NaN payloads. Exercise
+  // the final mapped doubleword and an access crossing into unmapped memory.
+  code[0] = 0xed920b00; // vldr d0,[r2]
+  code[1] = 0xec510b10; // vmov r0,r1,d0
+  code[2] = 0xef000042;
+  touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, 0x1000, 4096);
+  for (unsigned trial = 0; trial < 64; ++trial) {
+    unsigned offset = trial & 1 ? 2046 : 1536;
+    code[offset] = 0x89abcdef; code[offset+1] = 0xfff81234;
+    regs[2] = 0x1000 + offset * 4; regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+    assert(regs[0] == 0x89abcdef && regs[1] == 0xfff81234);
+  }
+  regs[2] = 0x2ffc; regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
+  assert(regs[15] == 0x1000);
   // CPSR mode changes bank r8-r14. The adapter's supplied register state must
   // remain authoritative, as with the original write-CPSR-then-write-registers ABI.
   code[0] = 0xef000042;

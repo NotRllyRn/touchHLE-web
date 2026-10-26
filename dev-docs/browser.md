@@ -1760,3 +1760,48 @@ Actual Web Audio passes. Logs: `target/jit-live-regs-TEST_*.log` and
 and browser Rust9 tests remain the reference. Retain the register optimization
 for its measured transition benefit. Fresh TinkerBox timing/gameplay pending;
 M4/M5 and the thread goal remain open.
+
+### Live-register game timing and bounded doubleword loads (2026-10-26)
+
+Fresh live-register runtime (source committed as cdaadfd5; embedded version is
+c39e2a6a because the build preceded the commit), same Chromium/software-GPU
+host: terms match172 s/input176 s, main match202 s/input206 s, puzzles input246 s,
+training input288 s, first Play match592 s/input598 s. Training-to-Play310 s
+versus321 s previously; menu match10 s earlier. Single trials with screenshot
+sampling/dwell, not release medians. Clean interval ends at first Play: tests
+and diagnostic suspensions follow. Level rendering before Play ~3.2 FPS.
+Lesson1 SUCCESS is verified in `target/browser-jit-live-regs/canvas-728.png`.
+Logs: `target/jit-live-regs-{game,driver}.log`. Targets remain unmet.
+
+Prior no-raster profile has295/12725 inclusive samples under
+`helper_le_ldq_mmu_arm`; doubleword reads still used the generic memory helper.
+A small compiler extension emits aligned, bounded little-endian64-bit loads
+for the same adapter-only mappings. It preserves both32-bit TCI result halves.
+Other widths/formats/alignment and out-of-range accesses retain the helper.
+No floating-point arithmetic semantics change; stores are unchanged.
+
+JS21 pass, including both halves, address/result aliasing, high stack addresses,
+mapping boundaries, memory growth and fallback. Actual Node and Chromium CPU/
+fiber suites pass. New actual ARM VFP tests repeat64 loads of a NaN payload,
+including the last mapped doubleword; crossing into unmapped memory faults with
+the original guest PC. Logs: `target/jit-doubleword-{js,build,node,browser}.log`.
+
+Same-Wasm Asyncify benchmark, five trials/case, enabled/disabled/enabled medians
+(ms): doubleword5.385/30.294/4.654; tiny5.539/4.968/4.313; medium4.691/5.079/
+4.598; long6.085/4.770/4.802; code-page memory51.820/51.174/50.856; data-memory
+6.084/6.654/6.203; SVC113.092/111.058/108.758. Compiler eligibility alone is
+toggled; each instance uses the same Wasm binary. Only the task-owned diagnostic
+browser was suspended (20.852 s for build/initial benchmark,6.495 s for comparison),
+then resumed in finally. Logs: `target/jit-doubleword-{benchmark,comparison}.log`
+and corresponding `-pause.log` files. This is not a game-speed claim.
+Full runtime graphics checks pending using the existing validated runtime binary
+and updated separately loaded compiler; no C/Rust production code changed.
+
+Doubleword compiler full HLE graphics matrix passes twice with forced JIT
+threshold1: MIPMAP, COMBINE, LIGHTING, LIGHT_ATTENUATION, LIGHT_SPOT, FOG, MAPPED,
+POINT_PARAMETERS and PRESENT_BUFFERS. Logs: `target/jit-doubleword-TEST_*.log`;
+web build: `target/jit-doubleword-web-build.log`. Formatting/diff pass. Retain
+the compiler extension for its isolated measured gain. Actual game on this
+compiler remains pending; the continuing game still uses the prior compiler.
+Live-register game has advanced to Lesson2 and accepted pinch; placement and
+second SUCCESS verification are in progress.

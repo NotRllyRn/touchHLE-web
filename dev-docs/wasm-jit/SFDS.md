@@ -106,3 +106,8 @@ that replace the executing loop's own instruction. Compiled-hit statistics count
 C-to-generated-code dispatches, not internal self-loop iterations. Scheduler tests
 assert input arrives before the repeated-yield workload finishes, for both the
 preferred browser task API and MessageChannel fallback.
+
+Doubleword reads use an i64 Wasm load only for aligned, bounded little-endian
+64-bit accesses in the opted-in adapter mappings, then split into TCI low/high
+registers. Other formats retain Unicorn helpers. Payload bits, register aliasing,
+mapping boundaries, growth and actual VFP memory faults are regression-tested.

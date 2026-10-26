@@ -220,14 +220,14 @@
           get(21); constant(start); emit(0x46, 0x0d, ...uleb(labels.length));
           save(); get(21); emit(0x0f);
           cursor = pc + size;
-        } else if (['qemu_ld_i32', 'qemu_st_i32'].includes(name) && this.dispatch?.readLayout) {
-          const store = name === 'qemu_st_i32';
-          const value = byte(), address = byte(), oi = word(), memop = oi >>> 4;
+        } else if (['qemu_ld_i32', 'qemu_ld_i64', 'qemu_st_i32'].includes(name) && this.dispatch?.readLayout) {
+          const store = name === 'qemu_st_i32', wide = name === 'qemu_ld_i64';
+          const value = byte(), high = wide ? byte() : null, address = byte(), oi = word(), memop = oi >>> 4;
           const alignment = (memop >>> 4) & 7, width = memop & 3, bytes = 1 << width;
-          const inputs = store ? [value, address] : [address], outputs = store ? [] : [value];
+          const inputs = store ? [value, address] : [address], outputs = store ? [] : wide ? [value, high] : [value];
           // Pinned TCGMemOpIdx: low 4 bits are the MMU index; width is log2(size).
           // Alignment 7 means natural alignment (or unaligned on strict hosts).
-          if (!(memop & 8) && width < 3 && (store || width < 2 || !(memop & 4)) &&
+          if (!(memop & 8) && (wide ? width === 3 && !(memop & 4) : width < 3 && (store || width < 2 || !(memop & 4))) &&
               (alignment <= width || alignment === 7) &&
               (!store || this.dispatch.readLayout.length >= 5)) {
             const [engine, base, size, pointer, codePages] = this.dispatch.readLayout;
@@ -242,14 +242,20 @@
               reg(address); constant(15); emit(0x76, 0x6a, 0x2d, 0, ...uleb(codePages));
               constant(1); reg(address); constant(12); emit(0x76); constant(7); emit(0x71, 0x74, 0x71, 0x45, 0x71);
             }
-            emit(0x04, store ? 0x40 : 0x7f);
+            emit(0x04, store ? 0x40 : wide ? 0x7e : 0x7f);
             get(21); emit(0x28, 2, ...uleb(pointer)); get(22); emit(0x6a);
             if (store) { reg(value); emit([0x3a, 0x3b, 0x36][width], 0, 0); }
-            else emit([memop & 4 ? 0x2c : 0x2d, memop & 4 ? 0x2e : 0x2f, 0x28][width], 0, 0);
+            else emit([memop & 4 ? 0x2c : 0x2d, memop & 4 ? 0x2e : 0x2f, 0x28, 0x29][width], 0, 0);
             emit(0x05); helper(pc, inputs, outputs);
-            if (!store) reg(value);
+            if (!store) {
+              reg(value);
+              if (wide) { emit(0xad); reg(high); emit(0xad, 0x42, 32, 0x86, 0x84); }
+            }
             emit(0x0b);
-            if (!store) put(value);
+            if (wide) {
+              set(20); get(20); emit(0xa7); put(value);
+              get(20); emit(0x42, 32, 0x88, 0xa7); put(high);
+            } else if (!store) put(value);
           } else helper(pc, inputs, outputs);
         } else if (name === 'mb') {
           // Worker memory is unshared; TCI's fence has no additional effect.
