@@ -94,6 +94,30 @@ int main(void) {
     touchHLE_DynarmicWrapper_delete(cpu);
     free(code);
   }
+  for (unsigned trial = 0; trial < 5; ++trial) {
+    uint32_t *code = calloc(1, 8192);
+    code[0] = 0xec430b10; // vmov d0,r0,r3
+    code[1] = 0xed820b00; // vstr d0,[r2]
+    code[2] = 0xe2511001; code[3] = 0x1afffffc; // subs; bne store
+    code[4] = 0xef000042;
+    Cpu *cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
+    uint32_t *regs = touchHLE_DynarmicWrapper_regs_mut(cpu);
+    regs[0] = 0x89abcdef; regs[3] = 0xfff81234;
+    regs[1] = 100000; regs[2] = 0x2800; regs[15] = 0x1000;
+    double start = emscripten_get_now();
+    int result;
+    unsigned slices = 0;
+    do {
+      assert(++slices <= 1000);
+      uint64_t ticks = 100000000;
+      result = touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks);
+    } while (result == -1);
+    double ms = emscripten_get_now() - start;
+    assert(result == 0x42 && code[1536] == 0x89abcdef && code[1537] == 0xfff81234 && regs[1] == 0);
+    printf("BENCH {\"kind\":\"doubleword-store\",\"trial\":%u,\"instructions\":300002,\"ms\":%.3f}\n", trial, ms);
+    touchHLE_DynarmicWrapper_delete(cpu);
+    free(code);
+  }
   // Compare data sharing a translated page against a separate data page.
   for (unsigned data_page = 0; data_page < 2; ++data_page)
   for (unsigned trial = 0; trial < 5; ++trial) {

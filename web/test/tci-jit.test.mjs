@@ -6,7 +6,7 @@ import '../tci-jit.js';
 const names = ['movi_i32', 'mov_i32', 'add_i32', 'sub_i32', 'mul_i32', 'shl_i32',
   'sar_i32', 'shr_i32', 'rotl_i32', 'rotr_i32', 'setcond_i32', 'brcond_i32',
   'exit_tb', 'goto_tb', 'add2_i32', 'sub2_i32', 'mulu2_i32', 'setcond2_i32',
-  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32', 'call', 'qemu_ld_i64'];
+  'ld_i32', 'st_i32', 'qemu_ld_i32', 'qemu_st_i32', 'call', 'qemu_ld_i64', 'qemu_st_i64'];
 const word = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, n >>> 24];
 const imm = n => [255, ...word(n)];
 const op = (name, ...args) => [names.indexOf(name), args.length + 2, ...args];
@@ -275,6 +275,37 @@ test('inline stores recheck translated pages and retain helper fallback', () => 
           const fast = [2, 0x72].includes(memop) && !translated && [0, 4092].includes(offset);
           assert.equal(calls - previous, fast ? 0 : 1);
           if ([0, 4092].includes(offset)) assert.equal(view().getUint32(8192 + offset, true), fast ? 0x89abcdef : 0);
+        }
+        f.memory.grow(1);
+      }
+    }
+  }
+});
+
+test('inline doubleword stores recheck translated pages and retain helper fallback', () => {
+  for (const memop of [3, 0x73, 0x43, 11]) {
+    let calls = 0;
+    const f = fixture([...op('qemu_st_i64', 1, 2, 0, ...word(memop << 4)), ...exit()],
+      (_env, regs) => { calls++; assert.equal(new Uint32Array(f.memory.buffer, regs, 16)[1], 0x89abcdef); assert.equal(new Uint32Array(f.memory.buffer, regs, 16)[2], 0xfff81234); return 0; },
+      { counter: 96, clear() {}, readLayout: [0, 0, 8, 16, 32768] });
+    const view = () => new DataView(f.memory.buffer);
+    view().setUint32(0, 4096, true);
+    for (const base of [0x1000, 0xfffff000]) {
+      const slot = (base >>> 31) * 4;
+      view().setUint32(4096 + slot, base, true);
+      view().setUint32(4104 + slot, 4096, true);
+      view().setUint32(4112 + slot, 8192, true);
+      const flag = 4096 + 32768 + (base >>> 15), bit = 1 << ((base >>> 12) & 7);
+      for (const translated of [false, true, true]) {
+        view().setUint8(flag, translated ? bit : 0);
+        for (const offset of [0, 4088, 1, 4096, -4]) {
+          const address = (base + offset) >>> 0;
+          view().setBigUint64(8192 + (offset === 4088 ? 4088 : 0), 0n, true);
+          f.regs()[0] = address; f.regs()[1] = 0x89abcdef; f.regs()[2] = 0xfff81234;
+          const previous = calls; f.run();
+          const fast = [3, 0x73].includes(memop) && !translated && [0, 4088].includes(offset);
+          assert.equal(calls - previous, fast ? 0 : 1);
+          if ([0, 4088].includes(offset)) assert.equal(view().getBigUint64(8192 + offset, true), fast ? 0xfff8123489abcdefn : 0n);
         }
         f.memory.grow(1);
       }

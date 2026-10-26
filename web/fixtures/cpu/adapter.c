@@ -221,6 +221,34 @@ void adapter_checks(void) {
   regs[2] = 0x2ffc; regs[15] = 0x1000; ticks = 100;
   assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == -2);
   assert(regs[15] == 0x1000);
+  // Doubleword stores use a fresh engine so the data page starts untranslated.
+  // Reusing it for executable code must then force normal invalidation.
+  Cpu *store_cpu = touchHLE_DynarmicWrapper_new(NULL, 1);
+  uint32_t *store_regs = touchHLE_DynarmicWrapper_regs_mut(store_cpu);
+  code[0] = 0xec410b10; // vmov d0,r0,r1
+  code[1] = 0xed820b00; // vstr d0,[r2]
+  code[2] = 0xef000042;
+  for (unsigned trial = 0; trial < 64; ++trial) {
+    unsigned offset = trial & 1 ? 2046 : 1536;
+    store_regs[0] = 0x89abcdef; store_regs[1] = 0xfff81234;
+    store_regs[2] = 0x1000 + offset * 4; store_regs[15] = 0x1000; ticks = 100;
+    assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == 0x42);
+    assert(code[offset] == 0x89abcdef && code[offset+1] == 0xfff81234);
+  }
+  code[1024] = 0xe3a0002a; code[1025] = 0xef000043;
+  store_regs[15] = 0x2000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == 0x43);
+  assert(store_regs[0] == 42);
+  store_regs[0] = 0xe3a00063; store_regs[1] = 0xef000043;
+  store_regs[2] = 0x2000; store_regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == 0x42);
+  store_regs[15] = 0x2000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == 0x43);
+  assert(store_regs[0] == 99);
+  store_regs[2] = 0x2ffc; store_regs[15] = 0x1000; ticks = 100;
+  assert(touchHLE_DynarmicWrapper_run_or_step(store_cpu, code, &ticks) == -2);
+  assert(store_regs[15] == 0x1004);
+  touchHLE_DynarmicWrapper_delete(store_cpu);
   // CPSR mode changes bank r8-r14. The adapter's supplied register state must
   // remain authoritative, as with the original write-CPSR-then-write-registers ABI.
   code[0] = 0xef000042;

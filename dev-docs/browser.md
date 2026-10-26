@@ -2050,3 +2050,49 @@ FP fingerprints and repeated instances pass. Browser build and two actual
 forced-JIT HLE MIPMAP runs pass. No Rust/C change required a runtime relink;
 the game worker imports the updated compiler from the rebuilt static files.
 Logs `target/jit-float-range-{js,build,node,browser,web-build,hle}.log`.
+
+### Bounded doubleword stores (2026-10-26)
+
+A diagnostic fresh run on38fb8457 reached terms152 s, menu182 s, puzzles222 s,
+training272 s (screenshot matches). This run overlaps CPU fixture builds and
+profiling, so none are clean acceptance timings. Initial15.9 s startup profile:
+13480 samples, generated Wasm1215, compiler1208, dispatcher1153, store_helper905,
+CPU885, address translation724, interpreter646, Module633, mapping lookup624.
+`target/jit-float-range-startup-profile{.log,/worker.cpuprofile}`.
+
+A temporary single-op helper wrapper, with native dispatch cleared before
+compiled-table eviction and translation metadata retained, counts270298
+fallbacks/15.03 s:138991 doubleword stores,100392 word loads,30660 doubleword
+loads,255 word stores. Later after the training action:21583 fallbacks/15.02 s,
+11281 doubleword stores (4181 meet the bounded aligned non-code-page gate,
+7100 fail other checks),8796 doubleword loads,1506 word loads. Both wrappers
+restore the original step function and evict instrumented modules in finally.
+These are stage-dependent diagnostic counts, not uninstrumented throughput.
+`target/jit-range-memory-fallbacks{,-loading}.log`. The inspector was stopped
+through Stop during loading; its driver was terminated deliberately. No guest
+failure or new completed-lesson claim. Screenshot `target/jit-range-loading-stop.png`.
+
+Extend the existing direct memory branch to aligned little-endian64-bit stores.
+Combine low/high TCI operands into a Wasm i64; retain the same engine, mapping,
+bounds and translated-page checks. Eight-byte alignment means the access cannot
+cross a4096-byte page. Other alignments/formats, generic engines, faults and
+translated code use the unchanged helper with all three input registers saved.
+No new mapping, C bridge or invalidation mechanism.
+
+JS24 pass, including low/high regions, endpoint/out-of-range/misaligned stores,
+memory growth and dynamic code-page flags. Actual ARM VSTR tests use a fresh
+engine for initially untranslated data, verify NaN payload bits and the final
+mapped doubleword, then execute a destination page, overwrite its instructions
+through VSTR, and verify the new instructions execute. Cross-boundary store
+faults preserve guest PC1004. Rebuilt Node and Chromium CPU/fibers (including
+FP fingerprints and repeated instances) pass. All nine forced-JIT graphics
+fixtures pass twice. Existing dead-code build warning remains.
+
+Same-binary enabled/disabled/enabled five-trial medians, no concurrent game/build:
+doubleword-store4.740/46.932/4.820 ms; doubleword-load4.630/4.665/5.063;
+word-memory50.515/50.073/51.318; data-memory5.915/6.928/5.907;
+SVC104.646/105.291/104.412. Sticky multiply4.571/4.579/4.557.
+Retain the measured targeted gain; full-game timing/correctness on this final
+compiler remains pending. Logs `target/jit-wide-store-{js,build,node,browser,
+comparison,web-build,hle}.log` and `jit-wide-store-<GRAPHICS_FIXTURE>.log`.
+The benchmark-build log overlaps the diagnostic game; its timings are not used.

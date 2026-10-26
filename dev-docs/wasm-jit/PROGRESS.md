@@ -231,3 +231,11 @@ actual Node/Chromium CPU/fibers and two forced-JIT HLE runs. Repeat paired
 sticky multiply medians4.176/4.652/4.530 ms; modest gain only. Both lesson
 checks precede this last equivalent guard simplification. Next: profile loading
 on the current compiler; broad CPU-state promotion still needs evidence.
+
+Startup memory fallback sampling supports bounded64-bit stores:138991/270298
+fallbacks in one15 s window;4181 later stores satisfy the conservative fast gate.
+Implemented within existing mapping/code-page contract. JS24, actual Node/
+Chromium CPU/fibers and all nine HLE graphics fixtures twice pass. New ARM tests
+verify bit preservation, endpoint/fault PC and executable-page invalidation.
+Paired doubleword-store4.740/46.932/4.820 ms; retain. Fresh game timing/two-lesson
+validation still required; M4/M5 and goal remain open.
