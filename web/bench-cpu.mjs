@@ -8,11 +8,12 @@ execFileSync('emcc', ['web/fixtures/cpu/benchmark.c', process.env.CPU_ADAPTER ||
   '-Itarget/unicorn.js/unicorn/include', '-O2', '-sSUPPORT_LONGJMP=wasm',
   '--pre-js', 'web/tci-jit.js', '-sALLOW_TABLE_GROWTH=1',
   '-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=["$addFunction","$removeFunction"]',
+  ...(process.env.CPU_ASYNCIFY === '1' ? ['-sASYNCIFY=1', '-sASYNCIFY_REMOVE=["tcg_qemu_tb_exec_arm"]'] : []),
   '-sALLOW_MEMORY_GROWTH=1', '-sMODULARIZE=1', '-sENVIRONMENT=node',
   '-o', 'target/browser-cpu/benchmark.js'], { cwd: root, stdio: 'inherit' });
 const require = createRequire(import.meta.url);
 for (const enableTciJit of [false, true]) {
-  console.log(JSON.stringify({ backend: enableTciJit ? 'jit' : 'interpreter', node: process.version }));
+  console.log(JSON.stringify({ backend: enableTciJit ? 'jit' : 'interpreter', node: process.version, asyncify: process.env.CPU_ASYNCIFY === '1' }));
   const result = await require(`${root}target/browser-cpu/benchmark.js`)({ enableTciJit });
   if (enableTciJit) {
     console.log(JSON.stringify(result.tciJit.stats));

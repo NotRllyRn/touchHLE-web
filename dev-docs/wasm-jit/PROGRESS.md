@@ -61,3 +61,9 @@ startup median improves 58.579 to 56.356 s. Browser game still loading at
 302.8 s despite 55.4 million compiled dispatches and no compilation failures.
 Next: sample later loading, optimize the measured bottleneck, then repeat clean
 game acceptance and graphics/audio regressions. M4/M5 and the goal remain open.
+
+Later loading profile identified Asyncify JS wrappers around the synchronous
+single-op helper. Importing the same helper as a raw Wasm function passes Node,
+Chromium CPU/fibers, forced-JIT HLE mipmap twice, JS tests and Web Audio checks.
+Same-Wasm Asyncify memory-loop median falls 144.014 to 101.705 ms (five trials).
+Full-game retest underway; no real-time or startup acceptance claim yet.

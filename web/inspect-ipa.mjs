@@ -104,7 +104,7 @@ try {
       nextDiagnostic = second + 30;
     }
     if (second >= nextScreenshot) {
-      await page.locator('#canvas').screenshot({ path: `${output}canvas-${second}.png` });
+      await page.locator('#canvas').screenshot({ path: join(output, `canvas-${second}.png`) });
       nextScreenshot = second + 10;
     }
     if (await page.locator('#stop').isDisabled()) {
@@ -113,6 +113,6 @@ try {
       break;
     }
   }
-  await page.screenshot({ path: `${output}page.png`, fullPage: true });
+  await page.screenshot({ path: join(output, 'page.png'), fullPage: true });
   if (await page.locator('#stop').isEnabled()) await page.locator('#stop').click();
 } finally { await browser.close(); }

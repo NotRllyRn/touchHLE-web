@@ -1307,3 +1307,37 @@ from the rejected direct normalized QEMU-helper experiment. Node CPU/fault/cache
 context/fiber regressions pass (`target/jit-raw-step-node.log`). Full runtime and
 browser tests are pending. Inspector now joins its control-file path correctly
 with or without a trailing directory slash; CDP attachment is opt-in, loopback.
+
+Raw-helper Chromium shared CPU/fiber checks also pass
+(`target/jit-raw-step-browser.log`). First full runtime build failed its patch
+verification because a separate raw-helper patch overlapped the existing JIT
+patch (`target/jit-raw-step-runtime-build.log`). Consolidated the edit into the
+JIT patch; idempotent patch/build succeeds before the runtime rebuild
+(`target/jit-raw-step-idempotent.log`). No benchmark timing is taken during builds.
+Added a 500,001-instruction read/modify/write guest-memory benchmark with output
+assertions and optional CPU_ASYNCIFY=1 to represent the production wrapper setup.
+The later inspector run omitted a trailing directory slash; its screenshots were
+written adjacent to the directory, so the driver could not observe them. All
+output paths now use join. Manual inspection at 392 s still shows startup splash;
+this diagnostic run is not a valid automated menu timing trial.
+
+Consolidated raw-helper runtime build completed successfully
+(`target/jit-raw-step-runtime-build-fixed.log`); forced-JIT actual HLE mipmap
+fixture passes twice (`target/jit-raw-step-mipmap.log`). All 14 JS tests pass
+(`target/jit-raw-step-js.log`), Rust formatting passes. Prior diagnostic game
+still shows splash at 552 s; its middle portion overlapped compilation.
+
+Isolated five-trial Asyncify benchmark (`CPU_ASYNCIFY=1 node web/bench-cpu.mjs`,
+Node 22.22.3, i9-13900H, no browser/build running): interpreter/raw-JIT medians
+(ms): tiny 70.094/10.198, medium 99.358/9.487, long 306.669/14.209,
+memory 166.696/101.705, 50k SVC 227.552/186.785.
+For a controlled wrapper comparison, copy generated benchmark.js to ignored
+benchmark-wrapped.js, replace its single `wasmTable.get(step)` expression with
+`wasmExports["touchhle_tci_step"]`, and run that factory with enableTciJit=true.
+Both use the identical benchmark.wasm. Wrapped-JIT medians: tiny 11.093,
+medium 10.655, long 16.743, memory 144.014, SVC 189.579 ms. Memory raw range
+100.364–118.227 vs wrapped 140.666–163.203 ms (~29.4% median reduction).
+Logs: `target/jit-{raw,wrapped}-step-async-benchmark.log`. Compilation/tiering
+included; these are synthetic measurements, not game FPS or startup claims.
+Actual Web Audio PCM/gain/scheduling/stop/cleanup test passes
+(`target/jit-raw-step-audio.log`). Fresh full-game run and later profile underway.
