@@ -162,3 +162,15 @@ unchanged, with full state transfer for unclassified operations. Preserve the
 incoming value when a branch skips a write. Same-block loops keep locals, as
 before. Validate randomized skipped writes, helper state, actual CPU fingerprints,
 linked code invalidation, fibers and game behavior before acceptance.
+
+## Exact floating-point flag updates
+
+Candidate fast paths for binary32 multiply use binary64's exact48-bit product.
+For add/sub, allow an initially clear inexact flag only for zero operands or
+exponent differences <=29, bounding the exact significand to53 bits. Compare
+that exact value with the promoted rounded binary32 result, setting only inexact
+when they differ. Preserve existing flags. Nearest-even, finite normal-or-zero
+inputs and strictly above-minimum-normal finite results remain required, with
+exact signed-zero results allowed separately. All exceptional cases use the
+original helper; division keeps its existing sticky-inexact gate. Validate result
+bits and FPSCR across rounding/FZ/DN modes and targeted exponent boundaries.

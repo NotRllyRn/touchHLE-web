@@ -331,3 +331,10 @@ without changing production flags. M4/M5 remain open.
 O3 benchmark experiment shows no convincing gain (linked108.2/108.0/107.0 ms,
 SVC118.7/125.5/120.6 O2/O3/O2); retain production O2. Source compilation also
 varies, so no isolated linker claim. Next profile current loading/HLE cost.
+
+Current loading profile identifies soft-float add/multiply/rounding as substantial
+remaining CPU cost. Exact binary64 reference for bounded binary32 arithmetic
+preserves flags while accelerating clear-inexact add/mul/cancellation ~3–4x in
+synthetic comparisons. Actual Node/Chromium fingerprints, precision/tie cases,
+cache/fibers, JS28 and nine graphics fixtures twice pass; code growth~2.7% in
+benchmark corpus. Fresh clean game and both lessons next; no game gain claimed.

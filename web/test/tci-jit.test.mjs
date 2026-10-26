@@ -184,7 +184,10 @@ test('guarded float operations retain rounding, flag and special-value fallback'
   const bits=x=>{bitsView.setFloat32(0,x,true);return bitsView.getUint32(0,true);};
   const value=x=>{bitsView.setUint32(0,x,true);return bitsView.getFloat32(0,true);};
   const normalOrZero=x=>!(x&0x7fffffff)||((x&0x7fffffff)>=0x00800000&&(x&0x7fffffff)<0x7f800000);
-  const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[Infinity,1],[NaN,1],
+  const pairs=[[1,2],[0,1],[-0,1],[1,-1],[1,0],[-0,-1],[0,-1],[1.1,1.1],
+    [2**-100,2**-100],[1,2**-29],[1,2**-30],[1,2**-100],[-0,-0],
+    [value(0x00800001),value(0x00800000)],[value(0x00800001),-value(0x00800000)],
+    [Infinity,1],[NaN,1],
     [value(0x7f7fffff),value(0x7f7fffff)],[value(0x00800000),1],[value(0x00800001),1],
     [value(0x007fffff),1],[value(0x7f7fffff),1],[value(1),1]].map(p=>p.map(bits));
   for(let i=0;i<300;i++)pairs.push([random(),random()]);
@@ -199,12 +202,18 @@ test('guarded float operations retain rounding, flag and special-value fallback'
       f.regs()[0]=a;f.regs()[1]=123;f.regs()[2]=b;f.regs()[5]=4096;
       status[0]=rounding;status[1]=flags;
       const expected=bits(operations[operation](value(a),value(b))), magnitude=expected&0x7fffffff;
-      const fast=rounding===0&&(flags&32)&&normalOrZero(a)&&normalOrZero(b)&&magnitude>0x00800000&&magnitude<0x7f800000;
+      const addSub=operation===0||operation===2;
+      const zeroOperand=!(a&0x7fffffff)||!(b&0x7fffffff);
+      const exactInputs=operation===1||(addSub&&(zeroOperand||Math.abs(((a>>>23)&255)-((b>>>23)&255))<=29));
+      const exactZero=!magnitude&&(addSub||(operation===1&&zeroOperand));
+      const fast=rounding===0&&(exactInputs||(flags&32))&&normalOrZero(a)&&normalOrZero(b)&&
+        ((magnitude>0x00800000&&magnitude<0x7f800000)||exactZero);
       const before=calls;f.run();
       assert.equal(calls-before,fast?0:1);
       assert.equal(f.regs()[0],fast?expected:0x11223344);
       assert.equal(f.regs()[1],0);
-      assert.deepEqual([...status],[rounding,flags]);
+      const inexact=fast&&operation!==3&&operations[operation](value(a),value(b))!==value(expected);
+      assert.deepEqual([...status],[rounding,flags|(inexact?32:0)]);
     }
   }
 });

@@ -2497,3 +2497,67 @@ both benchmark C source compilation and final linking; full-runtime cc::Build
 already inherits release optimization. It cannot establish an isolated linker
 benefit. No production flags changed; default benchmark artifact restored to O2.
 Next profile current game loading/HLE cost before another speculative CPU change.
+
+### Profile-guided exact floating-point fast paths (2026-10-26)
+
+Current ce9d4aab diagnostic startup profile:13426 samples, generated Wasm2170,
+dispatch1060, CPU993, compiler876, lookup587, run_call499, soft_f32_addsub477,
+float32_mul270, round_canonical237, miniz352. Actual level-loading profile after
+Training selection:13678 samples, generated Wasm3721, soft_f32_addsub1424,
+CPU1167, float32_mul809, round_canonical777, helper bridge646, run_call597,
+dispatch535, slice_mut301. Screenshot shows the loading transition from stage
+selection; these are self samples, not inclusive sums or acceptance timings.
+Artifacts `target/jit-current-{startup,level}-profile/{summary.json,worker.cpuprofile,page.png}`.
+No build/test competed with either sampling interval (the JS test finished45 s
+before the level sample). Diagnostic inspector stopped through UI; driver
+terminated afterward. This run is not a game acceptance trial.
+
+Candidate: binary64 represents normal binary32 multiplication exactly (at most
+48 significand bits). Add/sub is also exact in binary64 when either input is
+zero or exponent difference <=29 (at most53 bits). For these cases, compare the
+exact binary64 result against promoted rounded binary32 and OR the existing
+inexact flag when different. Nearest-even and normal-or-zero input guards remain;
+NaN/infinity/subnormal input and overflow/tiny results use QEMU. Retain strict
+result magnitude >FLT_MIN except exact signed zero: multiplication requires a
+zero operand; add/sub zero is exact cancellation. Division and wider-gap add/sub
+still require sticky inexact. Already-sticky cases skip precision/inexact work.
+No new Wasm feature or native execution change.
+
+Multiplication alone: same-Wasm new/old/new medians clear normal-multiply
+5.707/16.849/4.815 ms; zero-multiply5.804/16.693/5.092; sticky zero5.261/8.294/
+4.922. Linked-loop111.728/107.833/108.042, SVC119.207/118.692/118.022.
+Actual Node CPU/fingerprint/cache/fiber suite passes with this compiler injected
+before runtime initialization. `target/jit-exact-multiply-{js,node,comparison}.log`.
+
+Additional add/sub: new/multiply-only/new clear normal-add6.057/20.395/5.336,
+zero-add6.151/20.411/5.816, cancellation6.319/19.375/5.376 ms. Extra eager
+precision work makes sticky adds slower. Short-circuit/eager/short-circuit
+sticky zero-add5.033/5.287/4.711, sticky normal-add5.016/5.309/5.011;
+cancellation5.005/5.401/4.590. Keep short circuit for final validation. All these
+five-trial comparisons have no competing workload; synthetic gains only.
+`target/jit-exact-arithmetic-{comparison,short-comparison}.log`. JS28 pass with
+signed zero, exponent boundaries, special values, flags and fallback coverage.
+Actual ARM fixture adds explicit exponent-gap24/29/30/100, nearest-even ties and
+inexact multiplication assertions alongside existing65536-operation fingerprints.
+Full actual Node/Chromium regressions running; no production acceptance yet.
+
+Final selected compiler versus prior production, new/old/new five-trial medians
+(ms), no competing workload: clear normal-add6.076/20.964/5.547, normal-multiply
+6.501/17.028/5.108, zero-add6.073/20.537/6.519, zero-multiply5.792/15.838/
+5.109, cancellation5.709/19.781/4.691. Sticky normal-add4.996/4.906/4.714,
+sticky normal-multiply4.852/4.590/4.498; code-page memory48.260/48.181/48.521,
+linked-loop110.217/108.340/108.352, SVC119.016/115.567/116.938. Warmup variation
+remains; no persistent large unrelated regression. Emitted corpus bytes137208/
+133593/137208 (~2.7% growth),114 compiled modules and zero failures each.
+`target/jit-exact-arithmetic-final-comparison.log`.
+
+Selected compiler passes actual Node and Chromium CPU/context/FPSCR fingerprints,
+new precision/tie cases, cache invalidation and fibers. JS28 and formatting/diff
+checks pass. Logs `target/jit-exact-arithmetic-{build,node,browser,short-js}.log`.
+Nine forced-JIT graphics fixtures are running; real-game measurement remains next.
+
+Static build and all nine forced-JIT graphics fixtures each pass twice. Logs
+`target/jit-exact-arithmetic-{web-build,MIPMAP,COMBINE,LIGHTING,LIGHT_ATTENUATION,
+LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log`. Retain candidate
+for a fresh clean game measurement and both lesson checks. No runtime relink
+needed: Rust/C production code and metadata are unchanged; worker imports JS.

@@ -330,6 +330,22 @@ void adapter_checks(void) {
     regs[15] = 0x1000; ticks = 100;
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
     assert(regs[0] == simple[op] && regs[1] == 0);
+    // Precision-gate boundaries and nearest-even ties must preserve FPSCR.
+    if (op < 2) {
+      const unsigned gaps[] = {24, 29, 30, 100};
+      for (unsigned i = 0; i < 4; ++i) {
+        regs[0] = 0x3f800000; regs[1] = (127 - gaps[i]) << 23; regs[2] = 0;
+        regs[15] = 0x1000; ticks = 100;
+        assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+        assert(regs[0] == (op == 1 && gaps[i] == 24 ? 0x3f7fffff : 0x3f800000));
+        assert(regs[1] == (op == 1 && gaps[i] == 24 ? 0 : 0x10));
+      }
+    } else if (op == 2) {
+      regs[0] = regs[1] = 0x3f800001; regs[2] = 0;
+      regs[15] = 0x1000; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
+      assert(regs[0] == 0x3f800002 && regs[1] == 0x10);
+    }
     uint32_t hash = 2166136261u, seed = 0x12345678;
     for (unsigned mode = 0; mode < 32; ++mode) for (unsigned item = 0; item < 512; ++item) {
       seed = seed * 1664525u + 1013904223u;

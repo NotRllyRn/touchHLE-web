@@ -231,10 +231,23 @@
           const fp = this.dispatch.floatMath;
           const operation = callee === null ? -1 : fp?.callees.indexOf(callee) ?? -1;
           if (operation >= 0) {
-            // Match QEMU's hardfloat gate. Inexact must already be sticky;
-            // denormals, NaNs, infinities and tiny/overflow results use QEMU.
+            // Binary64 holds a binary32 product exactly (24+24 bits), and an
+            // add/sub with exponent gap <=29 (24+29 bits), or a zero operand.
+            // These cases can set inexact; wider gaps/division require it sticky.
+            // Exceptional inputs/results retain the QEMU helper.
             reg(5); emit(0x2d, 0, ...uleb(fp.rounding)); constant(fp.nearest); emit(0x46);
-            reg(5); emit(0x2d, 0, ...uleb(fp.flags)); constant(fp.inexact); emit(0x71, 0x45, 0x45, 0x71);
+            if (operation !== 1) {
+              reg(5); emit(0x2d, 0, ...uleb(fp.flags)); constant(fp.inexact); emit(0x71, 0x45, 0x45);
+              if (operation !== 3) {
+                emit(0x04, 0x7f); constant(1); emit(0x05); // sticky inexact
+                reg(0); constant(23); emit(0x76); constant(255); emit(0x71);
+                reg(2); constant(23); emit(0x76); constant(255); emit(0x71, 0x6b);
+                constant(29); emit(0x6a); constant(59); emit(0x49);
+                reg(0); constant(0x7fffffff); emit(0x71, 0x45, 0x72);
+                reg(2); constant(0x7fffffff); emit(0x71, 0x45, 0x72, 0x0b);
+              }
+              emit(0x71);
+            }
             for (const r of [0,2]) {
               reg(r); constant(0x7fffffff); emit(0x71); set(22);
               get(22); emit(0x45);
@@ -247,7 +260,23 @@
             get(21); constant(0x7fffffff); emit(0x71); set(22);
             get(22); constant(0x00800001); emit(0x6b);
             constant(0x7effffff); emit(0x49);
+            if (operation === 1) {
+              // Accept exact signed zero, but never an underflow rounded to zero.
+              get(22); emit(0x45);
+              reg(0); constant(0x7fffffff); emit(0x71, 0x45);
+              reg(2); constant(0x7fffffff); emit(0x71, 0x45, 0x72, 0x71, 0x72);
+            } else if (operation !== 3) {
+              // Normal binary32 add/sub can round to zero only by cancellation.
+              get(22); emit(0x45, 0x72);
+            }
             emit(0x05); constant(0); emit(0x0b, 0x04, 0x40);
+            if (operation !== 3) {
+              reg(5); emit(0x2d, 0, ...uleb(fp.flags)); constant(fp.inexact); emit(0x71, 0x45, 0x04, 0x40);
+              reg(0); emit(0xbe, 0xbb); reg(2); emit(0xbe, 0xbb, [0xa0,0xa2,0xa1][operation]);
+              get(21); emit(0xbe, 0xbb, 0x62, 0x04, 0x40); // exact product != rounded
+              reg(5); reg(5); emit(0x2d, 0, ...uleb(fp.flags)); constant(fp.inexact);
+              emit(0x72, 0x3a, 0, ...uleb(fp.flags), 0x0b, 0x0b);
+            }
             get(21); put(0); constant(0); put(1);
             emit(0x05); invoke(); emit(0x0b);
           } else invoke();

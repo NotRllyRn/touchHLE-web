@@ -97,12 +97,13 @@ CPU exception, floating-point fingerprint and fiber tests gate integration.
 
 ## Guarded VFP arithmetic
 
-Specialize only the common path already allowed by QEMU's hardfloat policy:
-nearest-even, sticky inexact, normal/zero operands, and a normal finite result
-strictly larger than FLT_MIN. C exports helper identities, status offsets and
-enum values; generated core Wasm f32 operations preserve the original fallback
-for all other cases. This avoids a helper call for measured hot arithmetic
-without changing floating-point semantics or requiring a new ARM decoder.
+Use nearest-even, normal/zero operands, and a normal finite result strictly
+larger than FLT_MIN, or a separately checked exact signed zero. Binary64 gives
+an exact reference for binary32 multiplication and add/sub with exponent gap
+<=29 or a zero operand, allowing precise inexact-flag updates. Other add/sub
+cases and division require inexact already sticky. All exceptional cases retain
+the original helper. C exports identities, status offsets and enum values;
+core Wasm arithmetic needs no new ARM decoder or browser extension.
 The pinned interpreter supplies result/FPSCR fingerprints across rounding,
 FZ/DN, sticky flags, edge values and seeded inputs, including division.
 
