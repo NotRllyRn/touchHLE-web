@@ -1,3 +1,6 @@
+> Superseded by the user-authorized offline-precompilation pivot; see PROGRESS.md.
+> Public preview stopped. The paused snapshot below is historical.
+
 # Paused development handoff
 
 2026-10-27. User explicitly requested a pause and a reachable browser preview.

@@ -1,28 +1,28 @@
 # Acceleration progress
 
-Updated: 2026-10-27. Thread goal: paused at user request.
+Updated: 2026-10-27. Engineering work resumed: offline precompilation pivot.
 
 ## Current checkpoint
 
-Development paused at user request. Resume from [HANDOFF.md](HANDOFF.md).
-The built preview includes the uncommitted anisotropy-cache candidate; its
-graphics regressions pass, but its full-game measurement was interrupted.
+User resumed development and requested offline IPA-to-web conversion. Public
+preview stopped. Baseline query cache committed as a517977e; user reports~30 s
+loads and apparently full-speed laptop gameplay (qualitative, not benchmarked).
 
+New objective: produce static per-game web packages with precompiled Wasm,
+measure against JIT, and optimize measured scene initialization. PRD/SAD/SFDS
+now describe this scope; original documents retained as *-jit-history.md.
 
-- Verified candidate: bounded direct SVC fetch. Both lessons pass; menu132 s,
-  level137 s (previous158 s), first-minute logged FPS median3.28.
-  Pushed as b44f389c. Chromium141/SwiftShader; no hardware GPU.
-- CPU and nine graphics regressions pass. Service-transition benchmark~38% faster;
-  single clean game level-load comparison~13% faster; no FPS gain claimed.
-- Alternate SwiftShader compositor: level153 s, FPS median5.10, both lessons pass.
-  This is a browser configuration comparison; default launch stays unchanged.
-- Next: measured graphics state-query caching. Alternate compositor removes
-  readbacks, but synchronous state queries occupy much of the remaining wait.
-- Remaining acceptance: under10 s loading, >=30 FPS with correct simulation/input
-  timing, three fresh trials, and browser/device coverage per PRD. Goal unmet.
-- Avoid repeating rejected dispatch-table expansion, tail-call/table dispatch,
-  ordinary Wasm dispatch loop, private scratch promotion and float side exits
-  without new evidence; exact negative results are recorded in ../browser.md.
+- [x] A0: preserve baseline, stop public server, record pivot.
+- [ ] A1: portable relocatable TCI-to-Wasm and correctness tests.
+- [ ] A2: offline converter and game-only static player.
+- [ ] A3: comparable TinkerBox performance and lesson acceptance.
+- [ ] A4: static discovery/loading optimizations guided by profiles.
+
+Goal-tool limitation: create_goal rejected replacement because the old unfinished
+objective still exists. It remains paused in tool metadata; do not mark it complete
+to bypass this. User explicitly authorized resumed work with the new scope above.
+
+Historical JIT milestones/evidence follow; they do not certify AOT acceptance.
 
 
 - [x] Inspect current CPU adapter and historical clean game acceptance.

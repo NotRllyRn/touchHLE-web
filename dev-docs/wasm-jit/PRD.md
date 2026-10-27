@@ -1,46 +1,47 @@
-# Browser CPU acceleration: product requirements
+# Offline IPA-to-web product requirements
 
-Status: implementation in progress. Owner: this fork. Updated: 2026-10-26.
+Updated2026-10-27. User-authorized pivot from online JIT optimization. Active
+engineering objective: build a local converter producing a static per-game web
+package, quantify its performance against JIT, and reduce measured scene loads.
+Historical requirements are preserved in PRD-jit-history.md.
 
-## Problem and outcome
+## Product
 
-The existing browser runtime runs TinkerBox HD 1.4.1 through Training 01 and
-Lesson 2 SUCCESS, but the recorded first Play action occurred at 3,394 seconds.
-That manually driven session is correctness evidence, not a controlled startup
-benchmark. Deliver usable local gameplay without changing the game's behavior.
+A developer supplies a locally owned ARM32 IPA to a command-line converter.
+The output is a static site containing the game, runtime, precompiled Wasm and
+assets. Visitors open a game player without an IPA-upload form. Execution,
+audio, graphics, input and saves remain local. No execution server is required.
+A Play button may be required for browser audio activation.
 
-## Requirements and acceptance
+## Acceptance
 
-- R1: User-selected IPA, code, assets, audio and saves remain on the device;
-  a static server is sufficient. Never check proprietary inputs into Git.
-- R2: Preserve native touchHLE and the existing Rust HLE/graphics/input fixes.
-- R3: Run clean TinkerBox Training 01 and Lesson 2 through SUCCESS with working
-  textures, sound delivery, pinch and placement; no injected state repairs.
-- R4: Target Run-to-interactive-menu and level-selection-to-interactive-level
-  each below 10 seconds. Report these separately, excluding human dwell time;
-  report cold runtime download/initialization and IPA import separately too.
-- R5: Target sustained >=30 presented frames/s and simulation time within 10%
-  of wall time over 60 seconds of active play, input response p95 <100 ms.
-  Rendering FPS alone does not establish correct simulation speed.
-- R6: Record machine, browser, build, backend, input hash (local only), trial
-  count, median/range startup, frame-time p50/p95/p99, compilation time/memory
-  and fallback frequency. At least three fresh-worker acceptance trials.
-- R7: Exercise real desktop Chromium first, then available Firefox/WebKit and
-  physical mobile/tablet devices. Emulated viewport is not device validation.
-  Identify unavailable hardware explicitly; do not imply universal coverage.
-- R8: Bounded execution, correct exceptions, CPU context switching, executable
-  cache invalidation and differential CPU tests must pass before default enable.
+- P1: Reproducible CLI package generation; build fingerprints reject mismatched
+  precompiled code. Proprietary packages remain in ignored local output paths.
+- P2: Reuse Rust touchHLE and verified Unicorn ARM/Thumb semantics. Native
+  correctness reference and existing graphics/audio/input fixes remain intact.
+- P3: Emit actual Wasm before visitors run the game; distinguish coverage from
+  file packaging. Report translated blocks, cache hits/misses and fallback.
+- P4: First milestone may use profile-assisted precompilation; it must be labeled
+  as such. Full-app static discovery is a separate milestone. ARM/Thumb mixed
+  code, indirect branches, runtime patches and generated code prevent claiming
+  complete static coverage from a linear sweep. Safe dynamic fallback is allowed
+  and measured; no claim of JIT-free execution unless proved by counters.
+- P5: Compare identical TinkerBox scenes and browser settings on fresh workers:
+  runtime/download, menu startup, level selection-to-interactivity, first60 s
+  gameplay, compilation time, artifact bytes, precompile time and memory.
+  Target under10 s level/menu loading and sustained30 FPS. Report failed targets.
+- P6: Complete Training01 and Lesson2 SUCCESS with actual input, pinch/placement,
+  graphics and audio delivery; CPU context/fault/invalidation regressions pass.
+- P7: Profile scene transitions to separate translation, asset reads/decoding,
+  HLE and game initialization. Preload only if measured useful; avoid speculative
+  whole-game asset loading or threads that compete with gameplay.
+- P8: At least three comparable trials before claiming stable game speedup.
+  Software-GPU CI numbers and qualitative laptop reports are separate evidence;
+  cross-browser and physical-device gaps remain explicit.
 
-## Scope
+## Non-goals
 
-Accelerate CPU execution and measured bottlenecks. Reuse WebGL2, Rust HLE,
-worker lifecycle, existing ARM semantics and interpreter fallback. Local runtime
-compilation is allowed. Exclude a new UI, WebGPU rewrite, full OS emulation,
-new game compatibility, speculative threading and persistent code cache.
-
-## Release gate
-
-A CPU microbenchmark is not game acceptance. Keep incomplete modes opt-in.
-Publish exact evidence and limitations in ../browser.md, track work in
-PROGRESS.md, and do not mark the thread goal complete before acceptance is met.
-Performance targets may require further engineering; failed targets remain open.
+No engine rewrite, new UI framework, cloud execution, automatic publishing of
+proprietary games, unsupported compatibility claims or decompilation to source.
+AOT means ARM-to-Wasm translation ahead of play; browsers still compile Wasm
+to their own machine code. It does not precompute arbitrary game initialization.
