@@ -54,6 +54,12 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
     // once per actual context; the closure reads the current legacy state.
     if (GLctx.touchhleLegacyQueries) return;
     GLctx.touchhleLegacyQueries = true;
+    // These measured hot queries otherwise synchronize with the GPU process.
+    // Cache actual results, never assumed defaults or results of setters.
+    let anisotropy = new WeakMap(), maxAnisotropy;
+    GLctx.canvas.addEventListener('webglcontextrestored', () => {
+      anisotropy = new WeakMap(); maxAnisotropy = undefined;
+    });
     // GLES 1's automatic mipmap flag is absent from WebGL. Generate the
     // chain after a base-level write, on the same bound texture object.
     for (const name of ['texParameteri', 'texParameterf']) {
@@ -65,7 +71,12 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
           texture.touchhleGenerateMipmap = !!value;
           return;
         }
-        return setParameter.call(this, target, pname, value);
+        const result = setParameter.call(this, target, pname, value);
+        if (target === this.TEXTURE_2D && pname === 0x84fe) {
+          const texture = this.getParameter(this.TEXTURE_BINDING_2D);
+          if (texture) anisotropy.delete(texture);
+        }
+        return result;
       };
     }
     const getTexParameter = GLctx.getTexParameter;
@@ -74,6 +85,15 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
         const texture = this.getParameter(this.TEXTURE_BINDING_2D);
         if (!texture) { GL.recordError(0x0502); return null; }
         return texture.touchhleGenerateMipmap ? 1 : 0;
+      }
+      if (target === this.TEXTURE_2D && pname === 0x84fe && !this.isContextLost()) {
+        const texture = this.getParameter(this.TEXTURE_BINDING_2D);
+        if (texture) {
+          if (anisotropy.has(texture)) return anisotropy.get(texture);
+          const value = getTexParameter.call(this, target, pname);
+          if (typeof value === 'number') anisotropy.set(texture, value);
+          return value;
+        }
       }
       return getTexParameter.call(this, target, pname);
     };
@@ -111,6 +131,12 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
     GLctx.getParameter = function (name) {
       let attribute;
       switch (name) {
+        case 0x84ff: { // MAX_TEXTURE_MAX_ANISOTROPY_EXT, per actual context
+          if (maxAnisotropy !== undefined && !this.isContextLost()) return maxAnisotropy;
+          const value = getParameter.call(this, name);
+          if (typeof value === 'number') maxAnisotropy = value;
+          return value;
+        }
         case 0x0b11: return GLEmulation.pointSize; // POINT_SIZE
         case 0x8126: case 0x8127: case 0x8128: case 0x8129:
           return GLEmulation.pointParameters[name];

@@ -262,3 +262,18 @@ new helper tests cover ordinary mapped fallback, cross-page reads, unmapped
 failures and direct-map crossing into an absent page. Existing ARM/Thumb budget,
 context/cache and nested-fiber tests remain required, followed by alternating
 service-call benchmarks and clean game acceptance.
+
+
+## Anisotropy query cache
+
+Within the existing once-per-WebGL-context wrapper, cache numeric results of
+getParameter(0x84ff) and getTexParameter(TEXTURE_2D,0x84fe). Never cache null or
+invalid results. Check context loss before serving cached values. For texture
+queries, resolve the current binding and key by the actual texture object.
+texParameteri/texParameterf invalidate that object's entry after forwarding.
+A webglcontextrestored listener clears the WeakMap and maximum value.
+
+Real-WebGL1/2 tests verify native query counts, disabled-extension errors on
+repeated queries, setters, invalid setters, independent textures, deletion,
+context loss and restoration. Integration requires the existing graphics suite
+and clean TinkerBox runs with exact compositor configuration recorded.

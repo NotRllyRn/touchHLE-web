@@ -198,6 +198,7 @@ TEST_LIGHT_SPOT=1 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node 
 python3 web/fixtures/make-hle-ipa.py --mipmap
 TEST_MIPMAP=1 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-runtime.mjs
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-audio.mjs
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/test-graphics-queries.mjs
 ```
 
 For a longer graphical investigation, use `web/inspect-ipa.mjs` as documented

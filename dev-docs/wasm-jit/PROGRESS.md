@@ -1,8 +1,13 @@
 # Acceleration progress
 
-Updated: 2026-10-27. Thread goal: active.
+Updated: 2026-10-27. Thread goal: paused at user request.
 
 ## Current checkpoint
+
+Development paused at user request. Resume from [HANDOFF.md](HANDOFF.md).
+The built preview includes the uncommitted anisotropy-cache candidate; its
+graphics regressions pass, but its full-game measurement was interrupted.
+
 
 - Verified candidate: bounded direct SVC fetch. Both lessons pass; menu132 s,
   level137 s (previous158 s), first-minute logged FPS median3.28.
@@ -551,3 +556,15 @@ FPS median5.10 versus3.28. No hardware GPU claim. Post-acceptance trace has zero
 readbacks/API calls; synchronous state queries now dominate waiting. Keep default
 launch and record alternative separately. Next: bounded anisotropy query caching
 with mutation/context/error regressions, before another clean comparison.
+
+
+c10a6af1 committed/pushed. Narrow anisotropy query cache implemented in browser
+GL wrappers. Real WebGL1/2 mutation/error/loss/restoration and avoided-native-
+query checks pass after fixing test restoration scheduling (initial stall
+documented). Full runtime/graphics/game validation and retention pending.
+
+
+Anisotropy-cache real-WebGL synchronization benchmark new/old/new medians
+2.4/153.8/1.2 ms for500 clears/1000 state queries (five trials each). This is
+avoided synchronization, not predicted game FPS. Full runtime rebuilding;
+graphics/game integration and commit remain pending.

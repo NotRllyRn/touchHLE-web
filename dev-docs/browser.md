@@ -3139,3 +3139,53 @@ software presentation caused the earlier readback wait. Next inspect conservativ
 caching of measured anisotropy queries, preserving texture mutations, invalid
 queries, context lifetime and the native reference. No graphics implementation
 change made yet. Both inspectors stopped through UI (exit1); drivers exit0.
+
+
+After c10a6af1 (compositor comparison/harness committed and pushed), prototype
+cache only measured anisotropy state: per-context successful maximum query,
+and per-texture successful anisotropy query. Both setters invalidate texture
+entries; context restoration clears both caches. Lost contexts and invalid/null
+queries retain native handling. WeakMap keys avoid retaining deleted textures.
+
+New real-WebGL1/2 test loads production wrappers with minimal SDK initialization
+scaffolding, preserving actual browser GL calls. It checks repeated-query native
+call counts, extension-disabled errors on every query, setters, invalid setter,
+texture switching/deletion and loss/restoration. Initial test stalled awaiting
+restoration because it requested restore during the loss-event dispatch; stopped
+owned process. Added bounded10 s waits and a50 ms event-loop delay; both WebGL
+versions now pass. Log target/gl-query-cache-browser-retry.log (expected invalid
+GL queries produce warnings); initial stop log target/gl-query-cache-browser.log.
+No full runtime/game performance claim yet.
+
+
+Anisotropy-cache isolated real-WebGL2 new/old/new benchmark, five trials each,
+explicit SwiftShader GPU-compositor flags:500 color clears plus500 maximum and
+500 texture-anisotropy queries, followed by gl.finish and value/error assertions.
+Medians2.400/153.800/1.200 ms. Ranges1.100–3.800/138.600–166.700/0.900–2.600.
+This stresses synchronization and permits batching equivalent clears; it is
+not a whole-game speedup estimate. Log target/gl-query-cache-comparison.log.
+Full runtime rebuild underway; graphics fixtures and clean game pending.
+
+
+Anisotropy-cache integration build completed successfully. `cargo fmt --all --
+--check` and `git diff --check` pass. Dedicated real-WebGL1/2 test rerun passes
+(target/gl-query-cache-browser-final.log). All nine forced-JIT graphics fixtures
+pass twice each under default and explicit SwiftShader compositor configurations
+(36 fixture runs total); logs target/gl-query-cache-{default,compositor}-*.log.
+Clean explicit-compositor TinkerBox measurement running, with no competing
+build/benchmark during loading or the first minute after Play.
+
+
+User requested development pause and network preview. Goal marked paused.
+Candidate clean game run interrupted during level loading: menu checkpoint142 s,
+Training checkpoint222 s, no Play/FPS acceptance result. Inspector stopped via
+UI (expected exit1); driver processes stopped. Preview serves built candidate
+on0.0.0.0:8765 with `?cpu=jit`. Resume instructions: wasm-jit/HANDOFF.md.
+
+
+User tested the preview on a real laptop and reports roughly30 s level loading
+and apparently full-speed gameplay (estimated30–60 FPS, not instrumented).
+This supports keeping the query-cache candidate after36 graphics fixture runs
+and actual WebGL1/2 regressions, but is not a controlled speedup measurement.
+User requested a pivot to offline IPA-to-web precompilation and stopping public
+preview;0.0.0.0:8765 server stopped. New scope tracked in wasm-jit plans.

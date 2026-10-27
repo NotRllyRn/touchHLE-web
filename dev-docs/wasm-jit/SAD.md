@@ -174,3 +174,13 @@ preceding PC. The existing immutable adapter page map permits a bounded direct
 copy when the entire instruction fits; otherwise use uc_mem_read. Preserve its
 read-failure result and the adapter's behavior for other interrupt numbers.
 Do not decode from exception syndrome, which retains only16 immediate bits.
+
+
+## Measured browser graphics queries
+
+Cache only successful numeric anisotropy queries in the actual WebGL context:
+maximum anisotropy per context, texture anisotropy in a WeakMap keyed by texture.
+Always forward setters and invalidate the affected texture afterward, even if
+the setter was invalid. Missing bindings, disabled extensions and lost contexts
+retain native behavior; context restoration resets both caches. This avoids
+synchronous GPU queries without assuming texture defaults or altering native GL.
