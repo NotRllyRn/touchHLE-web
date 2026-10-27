@@ -155,14 +155,24 @@ zero failures, interpreter parity and successful defines-omitted execution.
 Host writes require explicit adapter invalidation. No full CPU/game/native or
 remapping/protection acceptance yet. target/aligned-boundary-probe native A/B/A
 shows no consistent speed gain; do not adopt the compiler change.
-`...tinker-archive-codec-20261027-14` owns target/tb-archive-codec, preparing
-explicit LE export/import and fresh-module tests from the final Thumb snapshot.
-It is instructed not to build/test while parent runs serialized game timings.
+`...tinker-archive-codec-20261027-14` prepared target/tb-archive-codec with
+explicit LE export/import and fresh-process tests from the final Thumb snapshot.
+`...tinker-archive-codec-validation-20261027-16` now owns that directory and is
+authorized to build/test/fix it with2 jobs; parent game timings have finished.
 target/lossless-png-probe contains verified filter0/stored PNG candidate IPA;
 514 images and336 other files preserved, IPA+16.87%, expanded PNGs+221.4MiB.
 Parent target/run-asset-load.mjs and target/asset-load-driver.py compare visual
-checkpoints at1s cadence with identical production runtime/JIT. All artifacts
-and raw traces remain ignored. No speed/memory acceptance established yet.
+checkpoints at1s cadence with identical production runtime/JIT. Raw A/B/A first
+scene observations127/123/126s and main-menu119/111/117s are in
+target/asset-load-pilot-summary.json. Reject PNG adoption for the small unproven
+gain and221.4MiB possible cache growth. Only the second reference has endpoint
+process-tree PSS (1.314GB, not peak/browser-only/guest-memory). All three exited0,
+zero periodic JIT failures; first lesson screen visually checked, no new two-
+lesson acceptance claim. Both runtime/game browsers are now stopped.
+target/npot-investigation/notes.md shows this game's capability initializer
+checks neither NPOT token; merely advertising WebGL2's capability won't remove
+its POT rounding. Do not implement that string-only hypothesis. Scaling caller/
+dimension attribution is needed before another image-path optimization.
 Full task IDs are in ignored target/optimization-active-handoff.json.
 Archive-design review `...tinker-restore-archive-design-20261027-11` completed:
 explicit LE variable records/index, enforce full runtime/config identity,

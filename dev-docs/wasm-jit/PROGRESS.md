@@ -69,7 +69,11 @@ Natural-alignment boundary-check elimination passed correctness but produced no
 consistent native benchmark gain; production compiler is unchanged. Offline
 lossless PNG preprocessing preserves all 514 images and 336 other IPA entries,
 but increases the IPA by16.87% and expanded PNG bytes by221.4MiB. Controlled
-game loading comparisons are in progress; no asset speedup is established yet.
+serial game pilot gave original/candidate/original scene observations127/123/
+126s; that small difference does not justify the memory cost. Do not adopt it.
+The proposed NPOT extension-only change is also rejected: this executable's
+renderer does not check either NPOT extension token. Persistent archive codec
+execution validation is now running in isolation, with game timings stopped.
 
 User hardware reference: M3 Max MacBook, 16-core CPU, 64 GB RAM. Browser/OS
 and precise FPS remain unverified; reported ~30 s loads are qualitative.

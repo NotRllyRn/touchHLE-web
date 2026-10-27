@@ -81,3 +81,10 @@ eliminate these routines. Evaluate generated-code improvements against these
 workloads; any offline asset transformation would additionally need exact format,
 filtering, layout and game behavior equivalence. Do not infer that low host
 inflate time means all asset processing is cheap.
+
+The filter0/stored-IDAT pilot is not selected: serial original/candidate/original
+scene observations127/123/126s do not justify221.4MiB more expanded PNG data.
+Keep original assets in the default package. Likewise, advertising NPOT alone
+cannot change this executable's renderer because it checks neither NPOT token.
+Measure scaling callers and dimensions before changing its image path; backend
+GPU support alone does not establish that the game will use it.

@@ -3730,3 +3730,61 @@ conversion, scaling, CRC/Adler work or audio decoding. Browser performance and
 actual memory are unproven; preserve the original IPA and reject default adoption
 without a useful measured benefit. Signing metadata is unchanged and stale;
 this experimental browser asset is not claimed to be installable on iOS.
+
+### 2026-10-27 — Lossless PNG game pilot and rejected capability shortcut
+
+Completed serial original/filter0-stored/original runs with the unchanged core
+and JIT artifacts, fresh Chromium141 contexts, browserArgs[], default SwiftShader,
+and SCREENSHOT_SECONDS=1. No heavy builds, game workloads or profilers competed;
+other agents prepared source/review notes with lightweight syntax checks. Local
+harnesses are target/run-asset-load.mjs, asset-load-driver.py and
+summarize-asset-load.py. Each invocation used `node target/run-asset-load.mjs IPA
+OUTPUT`, with original `/root/local-ipas/TinkerBox HD 1.4.1.ipa` and candidate
+`target/lossless-png-probe/TinkerBox-HD-1.4.1-filter0-stored.ipa`. Output prefixes:
+`target/asset-load-original-1`, `target/asset-load-stored-1`,
+`target/asset-load-original-2`. All exit0 with zero failures in periodic JIT stats.
+
+| Observation, seconds | Original before | Stored/filter0 | Original after |
+| --- | ---: | ---: | ---: |
+| Main-menu first matching screenshot | 119 | 111 | 117 |
+| Training01 selection input timestamp | 164 | 143 | 161 |
+| First matching playable screenshot | 291 | 266 | 287 |
+| Selection to first matching screenshot | 127 | 123 | 126 |
+| Selection to preceding nonmatching screenshot | 125 | 121 | 124 |
+
+Times are relative to inspector navigation, not engine readiness events. Input
+logs have integer-second quantization; screenshots have actual2–3s gaps despite
+requested1s cadence. Two consecutive crop matches confirm each checkpoint; the
+table uses the first match. First lesson scene was visually checked, including
+the ball, ramps, bucket and tutorial overlay. This is a loading pilot, not both-
+lesson interaction acceptance. No performance profile or FPS instrumentation was
+installed. Raw checkpoints, screenshots, identities and counters remain ignored;
+`target/asset-load-pilot-summary.json` checks runtime hash equality. Reference
+counter snapshots can precede ready frames and are not exact per-phase deltas.
+
+The roughly3–4s candidate difference is small, with only one candidate trial;
+no stable speedup claim. Do not adopt the change given expanded PNG cache growth
+of221.4MiB and16.87% larger download. Guest copies/checksums/scaling remain and
+could offset removed inflate/filter work; this explanation is a hypothesis, not
+a measured new attribution. No further repetitions are justified for adoption
+unless a materially better memory/performance tradeoff is proposed.
+
+Only the second reference has a post-checkpoint Linux smaps_rollup sample:
+1314269184B summed PSS for inspector and descendants (including browser/GPU).
+This is an endpoint resident-process sample, not a peak, browser-only metric or
+Wasm allocation. The memory sampler ran after visual readiness and did not
+instrument execution. No corresponding candidate sample exists; do not infer
+its actual memory increase from this reference. Scripts and artifacts remain
+local. All diagnostic browsers were stopped before archive validation builds.
+
+A separate read-only investigation checked the texture-resizing hypothesis.
+The fixed guest extension list lacks NPOT, while the WebGL2 backend can support
+NPOT dimensions. However, this TinkerBox renderer's capability initializer
+checks neither NPOT token and does not set the capability consumed by its POT
+rounding helper. Adding an extension string alone is therefore not a supported
+optimization for this executable. Do not change the advertised API on this
+basis. Existing software-mipmap and generic blit callers also invoke scaling;
+obtain entry/caller/source/destination-dimension attribution before selecting a
+replacement. Investigation and provenance are in target/npot-investigation/
+notes.md; no guest code/asset bytes were copied into tracked files, and no runtime
+or timing test was performed for this hypothesis.
