@@ -13,14 +13,21 @@ measure against JIT, and optimize measured scene initialization. PRD/SAD/SFDS
 now describe this scope; original documents retained as *-jit-history.md.
 
 - [x] A0: preserve baseline, stop public server, record pivot.
-- [ ] A1: portable relocatable TCI-to-Wasm and correctness tests.
-- [ ] A2: offline converter and game-only static player.
+- [x] A1: portable relocatable TCI-to-Wasm and correctness tests.
+- [x] A2: profile-assisted offline converter and game-only static player.
 - [ ] A3: comparable TinkerBox performance and lesson acceptance.
 - [ ] A4: static discovery/loading optimizations guided by profiles.
 
 Goal-tool limitation: create_goal rejected replacement because the old unfinished
 objective still exists. It remains paused in tool metadata; do not mark it complete
 to bypass this. User explicitly authorized resumed work with the new scope above.
+
+Current evidence: generated original test games reuse all compiled instances;
+34 JS tests and actual CPU/fiber suite pass. TinkerBox v2 passes both lessons,
+148 s level load/4.595 median FPS, with12 s preparation; no material gain claimed.
+Optimized decoding reduces preparation to1.83 s in v3; clean game comparison is
+running. Artifacts remain private under target/. Full static discovery of the
+entire IPA, three-trial game comparisons and loading targets remain unfinished.
 
 Historical JIT milestones/evidence follow; they do not certify AOT acceptance.
 

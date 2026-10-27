@@ -3189,3 +3189,79 @@ This supports keeping the query-cache candidate after36 graphics fixture runs
 and actual WebGL1/2 regressions, but is not a controlled speedup measurement.
 User requested a pivot to offline IPA-to-web precompilation and stopping public
 preview;0.0.0.0:8765 server stopped. New scope tracked in wasm-jit plans.
+
+
+### Offline precompilation pivot (2026-10-27)
+
+User requested offline IPA-to-web conversion and a game-only static player, and
+authorized stopping the public preview.0.0.0.0 server stopped; diagnostic servers
+now bind only127.0.0.1. Plans rewritten with original JIT plans retained separately.
+Goal replacement tool rejected the request because the paused unfinished goal
+exists; no false completion was recorded. New objective tracked in PROGRESS.md.
+
+Portable template prototype preserves helper GETPC, current exit identities and
+mutable links via an imported base. First27 unit tests passed, but browser fixture
+found0/30 cache hits. Byte comparison identified engine-private pointers embedded
+in movi_i32. Portable v2 reads all move immediates from live TCI and normalizes
+those fields; it never reuses a session address as a value.27 tests pass again.
+First player tests also read innerText from collapsed details and falsely reported
+empty logs; changed the assertion to textContent. Failure logs retained locally.
+
+`node web/precompile-ipa.mjs target/browser-hle-test.ipa target/aot-fixture-v2
+--capture target/fixture-aot-capture.json` emits13 templates/18,343 Wasm bytes.
+`TEST_URL=http://127.0.0.1:8766/aot-fixture-v2/?jitThreshold=1
+PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+node web/test-precompiled.mjs` passes twice:30 precompiled instances,0 misses,
+0 failures each, actual guest puts/exit and no IPA chooser. Logs
+target/aot-fixture-v2-{build,browser}.log. Capture is diagnostic, not release timing.
+
+TinkerBox capture v1 completed both lessons including verified touch placement
+and SUCCESS screenshots.20,010 recorded blocks; after v2 normalization15,646
+templates,37,604,675 Wasm bytes,64,833,373 JSON archive bytes. Offline compilation
+from trace38,797 ms, excluding the~618 s interactive capture. Whole package173 MiB
+on disk (includes83,644,753-byte IPA). Artifacts target/aot-tinker-v2 and
+target/tinker-aot-capture.json remain ignored/private.
+
+Diagnostic level profile during capture:13,457 samples, generated guest Wasm6339
+(~47%), cpu_exec1742, TCI dispatch915, Environment::run_call818, call bridge215.
+Asset decompression was not a leading entry. Existing IpaFileRef::open already
+caches decompressed archive entries. This sample supports investigating guest
+initialization/dispatch before speculative asset preloading. Raw profile and
+summary: target/aot-capture-level-profile; capture logs target/aot-capture-*.log.
+
+First clean packaged TinkerBox run underway under the same explicit SwiftShader
+compositor configuration. Preparation of15,646 modules costs11,998 ms before the
+guest starts; this overhead must be included, not hidden in the comparison.
+No whole-game performance improvement established yet.
+
+
+Initial clean precompiled TinkerBox v2: AOT preparation11,998 ms, menu screenshot
+checkpoint152 s, Training input242 s to Play390 s =148 s. First60 s:50 logged
+FPS samples, median4.595, range0.61–9.19. Both lessons pass; actual pinch/placement
+and SUCCESS inspected in target/browser-aot-tinker-v2. Compared with earlier
+JIT153 s/5.10 median on the same explicit SwiftShader compositor, this is not
+a material improvement claim; single-run scene variance and screenshot cadence
+remain. No other benchmark competed during loading/first60 s. Diagnostic CPU
+and decoding work started afterward, so later lesson timing is not release data.
+Logs target/aot-tinker-v2-{game,driver}.log. Stop via UI gives expected exit1.
+
+Decode experiment initially overlapped the CPU suite and late gameplay; discard
+those timings as comparative evidence (aot-decode-comparison.log). Clean isolated
+rerun,3 trials per phase, all37.6 MB Wasm payload bytes decoded and checksummed:
+old/loop/native/old medians10248/1445.4/1045.9/10244.5 ms. Exact checksum matches
+all runs. Native Uint8Array.fromBase64 available in Chromium141; bounded simple
+loop is the fallback on older browsers/Node. Log target/aot-decode-isolated.log.
+Retain native/fallback decode, cache the immutable ABI string, and use ordinary
+JIT for cache misses. Optimized v3 preparation1,828.3 ms; clean game running.
+
+Final regressions: `node --test web/test/*.test.mjs`34 pass;
+`node web/test-precompiled-cpu.mjs` passes the source-built ARM/Thumb/VFP/FPSCR,
+contexts, SVC, faults, budgets, code invalidation, eviction and nested fiber suite
+in capture then offline-module mode:14,926 precompiled instances,0 misses/failures,
+61 templates. Expected unsupported syscall diagnostics remain.
+Full CLI capture->compile->package (without a supplied trace) passes for mipmap
+and presentation/buffer fixtures using `--threshold 1 --seconds 60`; generated
+player runs twice each with all130/103 compiled instances precompiled,0 misses.
+Logs target/aot-{js-regressions,actual-cpu-final,mipmap-build,mipmap-browser,
+present-build,present-browser}.log. `cargo fmt --all -- --check`, JS syntax checks
+and git diff --check pass. No Rust/native implementation changed in this pivot.

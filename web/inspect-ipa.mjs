@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 // Local graphical diagnostics, not a gameplay acceptance test.
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -19,13 +19,24 @@ if (process.env.INSPECTION_PORT) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid inspection port');
   args.push(`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1');
 }
+const captured = new Set(); let capturedAbi;
+const captureIdentity = process.env.CAPTURE_AOT ? await (await import('./precompile-files.mjs')).fingerprint(ipa) : null;
 const browser = await chromium.launch({ headless: true, args });
 try {
   const page = await browser.newPage();
   const started = Date.now();
   page.on('pageerror', error => { console.error(error); process.exitCode = 1; });
-  page.on('console', message => console.log(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${message.text()}`));
-  await page.addInitScript(() => {
+  page.on('console', message => {
+    const text = message.text();
+    if (text.startsWith('WORKER {"type":"aot-block"')) {
+      const record = JSON.parse(text.slice(7));
+      if (capturedAbi && capturedAbi !== record.abi) throw Error('Capture ABI changed');
+      capturedAbi = record.abi; captured.add(record.key);
+      return;
+    }
+    console.log(`[${((Date.now() - started) / 1000).toFixed(1)}s] ${text}`);
+  });
+  if (!process.env.PACKAGED_GAME) await page.addInitScript(() => {
     const Original = Worker;
     window.Worker = class extends Original {
       constructor(...args) {
@@ -46,8 +57,10 @@ try {
     const setup = `    runtime.FS.writeFile('/touchHLE_options.txt', ${JSON.stringify(process.env.INSPECTION_OPTIONS)});\n`;
     await route.fulfill({ response, body: source.replace(marker, setup + marker) });
   });
-  await page.goto(process.env.TEST_URL || 'http://127.0.0.1:8765');
-  await page.locator('#ipa').setInputFiles(ipa);
+  const url = new URL(process.env.TEST_URL || 'http://127.0.0.1:8765');
+  if (process.env.CAPTURE_AOT) { url.searchParams.set('cpu', 'jit'); url.searchParams.set('aot', 'capture'); }
+  await page.goto(url.href);
+  if (!process.env.PACKAGED_GAME) await page.locator('#ipa').setInputFiles(ipa);
   await page.waitForFunction(() => !document.querySelector('#run').disabled);
   if (process.env.HEADLESS) await page.locator('#headless').check();
   await page.locator('#run').click();
@@ -123,11 +136,21 @@ try {
       nextScreenshot = second + 10;
     }
     if (await page.locator('#stop').isDisabled()) {
-      const status = await page.locator('#status').innerText();
+      const status = await page.locator('#status').textContent();
       if (!status.includes('Guest exited with status 0')) process.exitCode = 1;
       break;
     }
   }
   await page.screenshot({ path: join(output, 'page.png'), fullPage: true });
   if (await page.locator('#stop').isEnabled()) await page.locator('#stop').click();
-} finally { await browser.close(); }
+} finally {
+  if (process.env.CAPTURE_AOT && capturedAbi) {
+    const { fingerprint } = await import('./precompile-files.mjs');
+    if (JSON.stringify(captureIdentity) !== JSON.stringify(await fingerprint(ipa)))
+      throw Error('Runtime artifacts changed during capture; discard the mixed-build trace');
+    await writeFile(process.env.CAPTURE_AOT, JSON.stringify({ format: 1, abi: capturedAbi,
+      identity: captureIdentity, keys: [...captured] }));
+    console.log(`Captured ${captured.size} portable blocks to ${process.env.CAPTURE_AOT}`);
+  }
+  await browser.close();
+}

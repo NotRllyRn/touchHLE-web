@@ -34,12 +34,15 @@
       this.addFunction = addFunction;
       this.removeFunction = removeFunction;
       this.threshold = threshold;
+      // Set by the offline tooling before the engine is created. Default JIT
+      // keeps its existing session-specialized code and retention limits.
+      this.portable = TouchHLETciJit.portable ?? null;
       this.names = [];
       this.blocks = new Map();
       this.compiled = new Map();
       this.liveBytes = 0;
       this.liveModules = 0;
-      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, evictions: 0, registered: 0, liveBytes: 0 };
+      this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, evictions: 0, registered: 0, liveBytes: 0, precompiled: 0, precompiledMisses: 0, emitMs: 0, moduleMs: 0, instantiateMs: 0 };
       if (dispatch) Object.defineProperty(this.stats, 'hits', {
         get: () => new DataView(this.memory.buffer).getFloat64(dispatch.counter, true),
       });
@@ -75,7 +78,17 @@
       if (++block.count < this.threshold) return 0;
       const start = performance.now();
       try {
-        const bytes = this.compile(ptr, block.size);
+        const emitStart = performance.now();
+        let description, cached;
+        if (this.portable) {
+          const abi = this.abi ??= this.portableAbi();
+          if (this.portable.abi && this.portable.abi !== abi) throw new Error('Precompiled ABI mismatch');
+          description = this.describePortable(ptr, block.size);
+          cached = this.portable.modules?.get(description.key);
+          if (this.portable.modules && !cached) this.stats.precompiledMisses++;
+        }
+        const bytes = cached?.bytes ?? this.compile(ptr, block.size, !!this.portable?.capture);
+        this.stats.emitMs += performance.now() - emitStart;
         if (bytes.length > 262144) throw new Error('Compiled block exceeds 256 KiB');
         if (this.liveBytes + bytes.length > 16 * 1024 * 1024 || this.liveModules >= 8192) {
           this.stats.evictions++;
@@ -91,8 +104,15 @@
           }
           this.stats.liveBytes = this.liveBytes;
         }
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes),
-          { e: { m: this.memory, s: this.step, c: this.dispatch?.call } });
+        const moduleStart = performance.now();
+        const module = cached?.module ?? new WebAssembly.Module(bytes);
+        this.stats.moduleMs += performance.now() - moduleStart;
+        const instantiateStart = performance.now();
+        const instance = new WebAssembly.Instance(module,
+          { e: { m: this.memory, s: this.step, c: this.dispatch?.call, b: ptr } });
+        this.stats.instantiateMs += performance.now() - instantiateStart;
+        if (cached) this.stats.precompiled++;
+        this.portable?.capture?.({ ...description, abi: this.abi });
         block.fn = this.addFunction(instance.exports.run, 'iiiii');
         block.bytes = bytes.length;
         this.compiled.set(ptr, block);
@@ -109,7 +129,41 @@
       this.stats.compileMs += performance.now() - start;
       return block.fn;
     }
-    compile(start, length) {
+    portableAbi() {
+      const d = this.dispatch;
+      return JSON.stringify({ version: 2, names: this.names, call: !!d?.call,
+        readLayout: d?.readLayout, exitCheck: d?.exitCheck, floatMath: d?.floatMath,
+        unaligned: d?.unaligned, pageMap: d?.pageMap, floatUnary: d?.floatUnary });
+    }
+    describePortable(start, length) {
+      if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
+        throw new Error('Invalid TCI block bounds');
+      const code = new Uint8Array(this.memory.buffer, start, length).slice();
+      const view = new DataView(code.buffer);
+      for (let offset = 0; offset < length;) {
+        const size = code[offset + 1], name = this.names[code[offset]];
+        if (!name || size < 2 || offset + size > length) throw new Error('Invalid TCI operation');
+        if (['br', 'brcond_i32', 'brcond2_i32'].includes(name)) {
+          const field = offset + size - 4;
+          view.setUint32(field, view.getUint32(field, true) - start, true);
+        } else if (name === 'goto_tb') {
+          // Alignment is part of the identity; links are patched at runtime.
+          const field = ((start + offset + 5) & ~3) - start;
+          code.fill(0, field, field + 4);
+        } else if (name === 'movi_i32') {
+          // Includes engine-private pointers (budget/stop fields). Read the
+          // current immediate in portable code instead of capturing an address.
+          code.fill(0, offset + 3, offset + 7);
+        } else if (name === 'exit_tb') {
+          code.fill(0, offset + 2, offset + size);
+        }
+        offset += size;
+      }
+      let binary = '';
+      for (let i = 0; i < code.length; i += 8192) binary += String.fromCharCode(...code.subarray(i, i + 8192));
+      return { key: `${start & 3}:${btoa(binary)}` };
+    }
+    compile(start, length, portable = false) {
       if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
         throw new Error('Invalid TCI block bounds');
       const view = new DataView(this.memory.buffer);
@@ -134,6 +188,10 @@
       const get = i => emit(0x20, ...uleb(i));
       const set = i => emit(0x21, ...uleb(i));
       const constant = value => emit(0x41, ...sleb(value));
+      const codePointer = address => {
+        if (portable) { emit(0x23, 0); constant(address - start); emit(0x6a); }
+        else constant(address);
+      };
       const defined = new Set(), written = new Set(), needed = new Set();
       const reg = i => { if (!defined.has(i)) needed.add(i); if (i > 15) throw new Error('Invalid TCI register'); get(i + 4); };
       const put = i => { if (i > 13) throw new Error('Invalid TCI destination'); defined.add(i); written.add(i); set(i + 4); };
@@ -144,7 +202,7 @@
         for (const i of indices) { get(1); emit(0x28, 2, ...uleb(i * 4)); set(i + 4); defined.add(i); written.add(i); }
       };
       const helper = (pc, inputs, outputs) => {
-        save(inputs ?? Array.from({ length: 16 }, (_, i) => i)); get(0); get(1); constant(pc); get(2); get(3); emit(0x10, 0, 0x1a);
+        save(inputs ?? Array.from({ length: 16 }, (_, i) => i)); get(0); get(1); codePointer(pc); get(2); get(3); emit(0x10, 0, 0x1a);
         restore(outputs);
       };
       emit(0x03, 0x40); // Same-block backedges keep TCI registers in locals.
@@ -169,7 +227,10 @@
         if (binary[name]) {
           const dst = byte(); operand(); operand(); emit(binary[name]); put(dst);
         } else if (name === 'movi_i32') {
-          const dst = byte(); constant(word()); put(dst);
+          const dst = byte();
+          if (portable) { codePointer(cursor); emit(0x28, 0, 0); word(); }
+          else constant(word());
+          put(dst);
         } else if (name === 'mov_i32') {
           const dst = byte(); reg(byte()); put(dst);
         } else if (['ld_i32', 'ld8u_i32', 'st_i32', 'st8_i32', 'st16_i32'].includes(name)) {
@@ -222,7 +283,7 @@
         } else if (name === 'call' && this.dispatch?.call) {
           const functionReg = byte(), callee = functionReg === 255 ? word() : null;
           const invoke = () => {
-            constant(pc); if (callee === null) reg(functionReg); else constant(callee);
+            codePointer(pc); if (callee === null) reg(functionReg); else constant(callee);
             for (const i of [0,1,2,3,5,6,7,8,9,10,11,12]) reg(i);
             emit(0x10, 1); set(20);
             get(20); emit(0xa7); put(0);
@@ -303,16 +364,19 @@
             invoke(); emit(0x0b, 0x0b, 0x0b);
           } else invoke();
         } else if (name === 'exit_tb') {
-          save(); get(3); constant(word()); emit(0x36, 2, 0); word();
+          save(); get(3);
+          if (portable) { codePointer(pc + 2); emit(0x28, 0, 0); word(); }
+          else constant(word());
+          emit(0x36, 2, 0); word();
           constant(0); emit(0x0f);
         } else if (name === 'goto_tb') {
           // Unicorn patches this relative displacement when linking/unlinking TBs.
           // Read it at execution time; never bake a mutable link into generated code.
           const address = (pc + 5) & ~3;
-          constant(address); emit(0x28, 2, 0); constant(address + 4); emit(0x6a); set(21);
+          codePointer(address); emit(0x28, 2, 0); codePointer(address + 4); emit(0x6a); set(21);
           // Recheck the mutable link every iteration, including after code writes.
           // Budgets and exit checks still execute at the beginning of the block.
-          get(21); constant(start); emit(0x46, 0x0d, ...uleb(labels.length));
+          get(21); codePointer(start); emit(0x46, 0x0d, ...uleb(labels.length));
           save(); get(21); emit(0x0f);
           cursor = pc + size;
         } else if (['qemu_ld_i32', 'qemu_ld_i64', 'qemu_st_i32', 'qemu_st_i64'].includes(name) && this.dispatch?.readLayout) {
@@ -403,9 +467,10 @@
         ...section(1, [3, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 14, ...Array(14).fill(0x7f), 1, 0x7e]),
-        ...section(2, [this.dispatch?.call ? 3 : 2, ...str('e'), ...str('m'), 2, 0, 0,
+        ...section(2, [(this.dispatch?.call ? 3 : 2) + (portable ? 1 : 0), ...str('e'), ...str('m'), 2, 0, 0,
           ...str('e'), ...str('s'), 0, 0,
-          ...(this.dispatch?.call ? [...str('e'), ...str('c'), 0, 2] : [])]),
+          ...(this.dispatch?.call ? [...str('e'), ...str('c'), 0, 2] : []),
+          ...(portable ? [...str('e'), ...str('b'), 3, 0x7f, 0] : [])]),
         ...section(3, [1, 1]),
         ...section(7, [1, ...str('run'), 0, this.dispatch?.call ? 2 : 1]),
         ...section(10, [1, ...uleb(body.length), ...body]),

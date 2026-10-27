@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+<title>touchHLE game</title>
+<link rel="stylesheet" href="style.css">
+<main>
+  <h1 id="title">Loading game…</h1>
+  <canvas id="canvas" width="1024" height="768"></canvas>
+  <button id="run" disabled>Play</button><button id="stop" disabled>Stop</button>
+  <p>Tap or click to interact. Pinch with two fingers, or scroll to zoom.</p>
+  <p id="state" role="status">Downloading game…</p>
+  <details><summary>Runtime log</summary><pre id="status"></pre></details>
+</main>
+<script type="module" src="game.mjs"></script>
+</html>

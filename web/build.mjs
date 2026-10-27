@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 execFileSync('cargo', ['build', '--locked', '-p', 'touchhle-browser',
   '--target', 'wasm32-unknown-unknown', '--release'], { cwd: join(root, '..'), stdio: 'inherit' });
 await mkdir(join(root, 'dist/vendor'), { recursive: true });
-for (const name of ['index.html', 'style.css', 'app.mjs', 'input.mjs', 'audio.mjs', 'audio-proxy.js', 'runtime-worker.js', 'tci-jit.js', 'cpu-worker.js', 'cpu-checks.mjs', 'ipa-worker.mjs', 'preflight.mjs']) {
+for (const name of ['index.html', 'style.css', 'app.mjs', 'input.mjs', 'audio.mjs', 'audio-proxy.js', 'runtime-worker.js', 'tci-jit.js', 'tci-precompile.mjs', 'cpu-worker.js', 'cpu-checks.mjs', 'ipa-worker.mjs', 'preflight.mjs']) {
   await copyFile(join(root, name), join(root, 'dist', name));
 }
 await copyFile(join(root, '../target/wasm32-unknown-unknown/release/touchhle_browser.wasm'),

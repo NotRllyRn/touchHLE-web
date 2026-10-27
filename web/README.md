@@ -243,3 +243,47 @@ per backend. These synthetic results do not establish game FPS. For startup
 sampling use `TEST_IPA=/absolute/path/to/owned.ipa node web/profile-runtime.mjs`;
 its sampled run is deliberately separate from acceptance timing. Wait for the
 runtime build to finish before testing or serving its JS/Wasm pair.
+
+
+## Offline game packages (experimental)
+
+The profile-assisted converter produces a static game page with no IPA chooser.
+It emits Wasm before play, reusing the same ARM/Thumb semantics and Rust HLE.
+Unseen blocks still use JIT; this is not yet a full-app static recompiler. Browsers
+still compile the supplied Wasm to native code. Performance comparison is ongoing.
+
+With a built runtime and local Playwright available:
+
+```sh
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+  node web/precompile-ipa.mjs /absolute/path/to/owned.ipa target/my-game --seconds 180
+python3 -m http.server 8766 --bind 127.0.0.1 --directory target/my-game
+```
+
+The command runs a bounded local preparation session. `--clicks actions.json`
+accepts the inspector's timed `{second,x,y}` actions to cover additional scenes;
+`INSPECTION_PORT` and its printed control JSON support live local diagnostics.
+Coverage depends on those actions. A prior captured trace can be reused with
+`--capture target/capture.json` when the IPA and core runtime fingerprints match.
+Capture format1 can be recompiled with newer portable code generation; it retains
+TCI immediates and runtime ABI metadata, not executable host pointers to reuse.
+Output directories must be new; repo-local outputs must live below ignored target/.
+
+Open the generated site and click Play. `?cpu=jit` runs the same packaged IPA
+without the precompiled cache for comparisons. `?jitThreshold=1` is for small
+regression fixtures. The package includes the original game archive and base64
+Wasm modules in precompiled.json; it does not publish or upload anything.
+`build-report.json` records artifact sizes and offline build time. Logs distinguish
+AOT preparation time, precompiled block instances, misses and fallback compilation.
+Do not interpret successful packaging or synthetic fixtures as TinkerBox acceptance.
+
+Tests: `node --test web/test/tci-precompile.test.mjs web/test/tci-jit.test.mjs`.
+`web/test-precompiled.mjs` checks two fresh runs of a generated original test IPA,
+actual offline-module execution, clean guest exit and static GET-only traffic.
+
+For complete CPU/fiber regression coverage, build the shared CPU fixture first
+(`node web/build-shared-cpu.mjs` with the SDK activated), then run
+`node web/test-precompiled-cpu.mjs`. This injects the current compiler before guest
+execution and compares capture versus offline modules through the real adapter.
+The converter's `--threshold 1` option forces compilation for short test IPAs;
+the ordinary game default remains32. Full static discovery is still pending.

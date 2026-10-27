@@ -103,6 +103,7 @@ run.onclick = async () => {
   const lines = [];
   worker = new Worker('./runtime-worker.js');
   worker.onmessage = ({ data }) => {
+    if (data.type === 'aot-block') return;
     if (data.type === 'audio') {
       try { audio?.handle(data); }
       catch (error) { status.textContent += `\nAudio failed: ${error.message}`; finish(); }
@@ -127,5 +128,6 @@ run.onclick = async () => {
   }
   worker.postMessage({ type: 'start', file: selectedFile, headless, canvas, audioClock,
     cpuBackend: new URLSearchParams(location.search).get('cpu'),
+    aotCapture: new URLSearchParams(location.search).get('aot') === 'capture',
     jitThreshold: new URLSearchParams(location.search).get('jitThreshold') === '1' ? 1 : 32 }, canvas ? [canvas] : []);
 };

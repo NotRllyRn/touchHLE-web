@@ -37,6 +37,25 @@ self.onmessage = async ({ data }) => {
       },
     });
     if (data.cpuBackend === 'jit') importScripts('./tci-jit.js');
+    if (data.aotCapture) {
+      const keys = new Set(); let bytes = 0;
+      TouchHLETciJit.portable = { capture: record => {
+        if (keys.has(record.key)) return;
+        if (keys.size >= 32768 || bytes + record.key.length > 32 * 1024 * 1024) {
+          if (!keys.full) { keys.full = true; self.postMessage({ type: 'log', message: 'AOT capture limit reached; coverage is partial.' }); }
+          return;
+        }
+        keys.add(record.key); bytes += record.key.length;
+        self.postMessage({ type: 'aot-block', ...record });
+      } };
+    }
+    if (data.precompiled) {
+      const { prepareCache } = await import('./tci-precompile.mjs');
+      const started = performance.now();
+      TouchHLETciJit.portable = await prepareCache(data.precompiled);
+      self.postMessage({ type: 'log', message: `AOT preparation ${JSON.stringify({ ms: performance.now() - started,
+        blocks: TouchHLETciJit.portable.modules.size, bytes: TouchHLETciJit.portable.bytes })}` });
+    }
     if (data.cpuBackend === 'jit') setInterval(() => {
       if (runtime.tciJit) self.postMessage({ type: 'log', message: `CPU JIT ${JSON.stringify(runtime.tciJit.stats)}` });
     }, 10000);
