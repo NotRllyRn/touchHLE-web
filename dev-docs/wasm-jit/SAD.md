@@ -1,6 +1,6 @@
 # Offline precompilation architecture
 
-Updated2026-10-27. See SAD-jit-history.md for retained runtime architecture.
+Updated: 2026-10-27. See SAD-jit-history.md for retained runtime architecture.
 
 ## Decision
 
@@ -15,7 +15,7 @@ runtime benefit. It is not yet a whole-app static compiler.
 1. Existing runtime remains the semantic reference and fallback.
 2. Portable TCI compiler normalizes only known session-relative fields: forward
    branch addresses, mutable goto links and exit-TB identities. Move immediates are also normalized because they contain engine-private
-   pointers. Portable ABI3 binds their current values as immutable imports at
+   pointers. Portable ABI 3 binds their current values as immutable imports at
    instantiation; invalidation/re-registration rebinds them for the new block. Other immediates remain exact. An immutable imported base relocates helper PCs and link reads;
    exit identities are read from the current live TCI. No stale host pointer is
    trusted. Exact normalized bytes and ABI layout select a module, never hash-only.

@@ -1,6 +1,6 @@
 # Offline precompilation functional design
 
-Updated2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
+Updated: 2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
 
 ## Milestones and checks
 
@@ -8,7 +8,7 @@ Updated2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
 - A1: Relocatable compiler. Validate across different TCI addresses and memories,
   relocated branches, mutable links, helper GETPC/fault propagation, exit identities,
   code mutation, cache reset, ABI mismatch and bounded retention. Immutable
-  parameters must rebind after invalidation; import vectors over127 entries
+  parameters must rebind after invalidation; import vectors over 127 entries
   require proper unsigned LEB128 encoding. Existing JIT
   output and behavior remain the default unless portable mode is selected.
 - A2: Offline CLI capture/compile/package. Emit actual Wasm, versioned metadata,

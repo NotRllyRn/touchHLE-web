@@ -15,19 +15,33 @@ now describe this scope; original documents retained as *-jit-history.md.
 - [x] A0: preserve baseline, stop public server, record pivot.
 - [x] A1: portable relocatable TCI-to-Wasm and correctness tests.
 - [x] A2: profile-assisted offline converter and game-only static player.
-- [ ] A3: comparable TinkerBox performance and lesson acceptance.
+- [x] A3: three-trial TinkerBox comparison and both-lesson correctness.
+  Performance targets remain unmet; this checks measurement, not target attainment.
 - [ ] A4: static discovery/loading optimizations guided by profiles.
 
 Goal-tool limitation: create_goal rejected replacement because the old unfinished
 objective still exists. It remains paused in tool metadata; do not mark it complete
 to bypass this. User explicitly authorized resumed work with the new scope above.
 
-Current evidence: generated original test games reuse all compiled instances;
-34 JS tests and actual CPU/fiber suite pass. TinkerBox v2 passes both lessons,
-148 s level load/4.595 median FPS, with12 s preparation; no material gain claimed.
-Optimized decoding reduces preparation to1.83 s in v3; clean game comparison is
-running. Artifacts remain private under target/. Full static discovery of the
-entire IPA, three-trial game comparisons and loading targets remain unfinished.
+Current evidence: 35 JS tests and actual CPU/fiber suite pass. Offline mode
+executes 14,926 fixture instances with zero misses/failures. Generated mipmap
+and presentation games pass twice each; TinkerBox and JIT reference complete
+both lessons, including pinch, placement and SUCCESS.
+
+Three fresh trials each: offline level loads 143/149/138 s (median 143 s,
+range 138–149), JIT 148/142/149 s (median 148 s, range 142–149). Ten-second
+screenshots and driver reaction limit precision: **no clear whole-game speedup**.
+First-minute FPS trial medians: offline 4.24/4.495/4.27, JIT 3.825/4.64/4.81.
+These are Chromium 141 / CPU SwiftShader measurements, not laptop/mobile results.
+Offline preparation is about 1.94 s, with 38.49 MB Wasm / 66.02 MB JSON archive
+added to the 83.64 MB IPA. Artifact growth and browser compilation remain costs.
+
+The loading CPU sample is dominated by guest execution/CPU dispatch/HLE;
+asset decompression is not a leading entry and decompressed entries are already
+cached. Next bounded experiment: specialize stable small move literals in offline
+modules while binding other immediates per engine. Exact identities must prevent
+wrong reuse. Full static ARM discovery/frontend removal and <10 s/device targets
+remain unfinished. Private artifacts stay under target/.
 
 Historical JIT milestones/evidence follow; they do not certify AOT acceptance.
 

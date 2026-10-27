@@ -268,7 +268,8 @@ accepts the inspector's timed `{second,x,y}` actions to cover additional scenes;
 `INSPECTION_PORT` and its printed control JSON support live local diagnostics.
 Coverage depends on those actions. A prior captured trace can be reused with
 `--capture target/capture.json` when the IPA and core runtime fingerprints match.
-Capture formats1–3 can be recompiled with current portable ABI3 code generation; it retains
+Trace format1 with portable ABI versions1–3 can be recompiled with current
+portable ABI3 code generation; it retains
 TCI immediates and runtime ABI metadata, not executable host pointers to reuse.
 Output directories must be new; repo-local outputs must live below ignored target/.
 

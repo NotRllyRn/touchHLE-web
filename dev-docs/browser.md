@@ -3307,3 +3307,26 @@ No hardware-GPU, Firefox/WebKit or physical-phone result is inferred. Additional
 clean JIT/precompiled alternating loading trials are underway on the same final
 package to assess variation. Local harness target/repeat-tinker-loads.py stops
 after the first minute of Play; result rows target/aot-repeat-results.jsonl.
+
+
+Alternating comparison completed on the final immutable-import package:
+precompiled level intervals 143/149/138 s, median 143, range 138–149;
+JIT 148/142/149 s, median 148, range 142–149. First-minute FPS trial medians
+precompiled 4.24/4.495/4.27, JIT 3.825/4.64/4.81. Do not average these into
+an FPS speedup claim. Ten-second screenshots plus driver reaction/detection
+and observed run variation prevent attributing the 5 s median difference to AOT.
+There is no clear scene-load or FPS improvement. Exact repeated rows:
+target/aot-repeat-results.jsonl; target/aot-repeat-driver.log. Initial accepted
+trials: aot-tinker-globals-clean and aot-jit-reference. All six game logs have
+zero sampled compiler failures and no page error/panic/RuntimeError signatures.
+Repeated performance runs stop deliberately after the first minute; full lessons
+were validated separately. Final repeated offline counters show 20,943/21,216
+precompiled instances and 2,939/2,678 JIT misses: coverage is not complete.
+
+Final repeated compilation totals (last sampled counters, not identical endpoints):
+offline 11,632.8/11,013.0 ms, JIT 21,958.1/22,974.8 ms. Offline upfront module
+preparation (~1,943 ms) and extra archive transfer are separate costs. This
+supports reduced compilation work, not reduced game initialization. Next measure
+whether retaining small exact literals restores optimization lost by parameterizing
+all move immediates. Any specialization must preserve exact cache identity and
+cross-engine invalidation; no pointer-range assumption may authorize stale reuse.

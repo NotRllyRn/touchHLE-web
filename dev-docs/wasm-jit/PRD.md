@@ -1,6 +1,6 @@
 # Offline IPA-to-web product requirements
 
-Updated2026-10-27. User-authorized pivot from online JIT optimization. Active
+Updated: 2026-10-27. User-authorized pivot from online JIT optimization. Active
 engineering objective: build a local converter producing a static per-game web
 package, quantify its performance against JIT, and reduce measured scene loads.
 Historical requirements are preserved in PRD-jit-history.md.
@@ -27,10 +27,10 @@ A Play button may be required for browser audio activation.
   complete static coverage from a linear sweep. Safe dynamic fallback is allowed
   and measured; no claim of JIT-free execution unless proved by counters.
 - P5: Compare identical TinkerBox scenes and browser settings on fresh workers:
-  runtime/download, menu startup, level selection-to-interactivity, first60 s
+  runtime/download, menu startup, level selection-to-interactivity, first 60 s
   gameplay, compilation time, artifact bytes, precompile time and memory.
-  Target under10 s level/menu loading and sustained30 FPS. Report failed targets.
-- P6: Complete Training01 and Lesson2 SUCCESS with actual input, pinch/placement,
+  Target under 10 s level/menu loading and sustained 30 FPS. Report failed targets.
+- P6: Complete Training 01 and Lesson 2 SUCCESS with actual input, pinch/placement,
   graphics and audio delivery; CPU context/fault/invalidation regressions pass.
 - P7: Profile scene transitions to separate translation, asset reads/decoding,
   HLE and game initialization. Preload only if measured useful; avoid speculative
