@@ -6,11 +6,13 @@ Updated: 2026-10-27. Thread goal: active.
 
 - Verified candidate: bounded direct SVC fetch. Both lessons pass; menu132 s,
   level137 s (previous158 s), first-minute logged FPS median3.28.
-  Chromium141/SwiftShader; no hardware GPU. Ready for commit/push.
+  Pushed as b44f389c. Chromium141/SwiftShader; no hardware GPU.
 - CPU and nine graphics regressions pass. Service-transition benchmark~38% faster;
   single clean game level-load comparison~13% faster; no FPS gain claimed.
-- Next: trace readPixels callers/layer geometry. Post-acceptance trace shows
-  38 readbacks occupying7.4 s of15 s, explaining much of worker waiting.
+- Alternate SwiftShader compositor: level153 s, FPS median5.10, both lessons pass.
+  This is a browser configuration comparison; default launch stays unchanged.
+- Next: measured graphics state-query caching. Alternate compositor removes
+  readbacks, but synchronous state queries occupy much of the remaining wait.
 - Remaining acceptance: under10 s loading, >=30 FPS with correct simulation/input
   timing, three fresh trials, and browser/device coverage per PRD. Goal unmet.
 - Avoid repeating rejected dispatch-table expansion, tail-call/table dispatch,
@@ -531,3 +533,21 @@ Post-acceptance graphics trace identifies38 ReadPixels calls totaling7.4 s/15 s
 (overlapping Finish waits8.0 s). Need caller stacks before choosing a graphics
 change. Existing EAGL slow composition path is one candidate, not yet proven.
 Game stopped cleanly via UI; direct-SVC changes ready to commit/push.
+
+
+b44f389c pushed. Default headless GPU compositing is disabled; explicit software
+GPU flags enable it with SwiftShader. Added BROWSER_ARGS to diagnostic/graphics
+harnesses for reproducibility. Compare fresh game under recorded flags; do not
+change EAGL composition without actual caller evidence. Goal remains unmet.
+
+
+Explicit SwiftShader compositing passes all nine graphics fixtures twice.
+Fresh b44f389c game run in progress under recorded launch flags; compare loading,
+FPS and both lessons before drawing conclusions. Hardware remains unavailable.
+
+
+Alternate-compositor clean game passes both lessons; level153 s versus137 default,
+FPS median5.10 versus3.28. No hardware GPU claim. Post-acceptance trace has zero
+readbacks/API calls; synchronous state queries now dominate waiting. Keep default
+launch and record alternative separately. Next: bounded anisotropy query caching
+with mutation/context/error regressions, before another clean comparison.

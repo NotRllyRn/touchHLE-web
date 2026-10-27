@@ -206,6 +206,19 @@ With a diagnostic runtime, `DIAGNOSTICS=1` logs draw counts and candidate saved
 main-thread registers every 30 seconds. `INSPECTION_DIR` can select a separate
 output directory (include its trailing slash) for each comparison run.
 
+Both `inspect-ipa.mjs` and `test-runtime.mjs` accept `BROWSER_ARGS`, a JSON array
+of extra Chromium arguments, and print it in the test log. For a separate
+headless software-compositor comparison, use:
+
+```sh
+export BROWSER_ARGS='["--enable-gpu","--ignore-gpu-blocklist","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]'
+```
+
+This still uses CPU-based SwiftShader, not a hardware GPU. Keep results from
+this configuration separate from default launches and real-device measurements.
+`unset BROWSER_ARGS` restores the default test configuration. This setting only
+affects the test harness; the deployed app does not change browser launch flags.
+
 ## Experimental CPU acceleration
 
 The source-built runtime includes an opt-in TCI-to-WebAssembly compiler. Open

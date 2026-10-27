@@ -3089,3 +3089,53 @@ EAGL composition fallback; do not assume the caller from timing alone. Existing
 find_fullscreen_eagl_layer can avoid CPU readback when its strict geometry
 requirements hold. Inspect actual layer state before changing those requirements.
 Game stopped through UI after trace; inspector exit1 expected, driver0.
+
+
+Readback attribution after b44f389c: first diagnostic wrapped WebGL2 readPixels
+before runtime initialization and observed no calls through150 s. A later live
+attach failed ECONNREFUSED because that timed run had already completed normally.
+Second diagnostic wraps both WebGL1/2 methods before initialization; no intercepted
+calls through170 s, despite presented terms frames. Trace readbacks are nested
+under compositor-frame-sink IPC callbacks, not game FunctionCall intervals. This
+points to browser software presentation; it does not yet prove all gameplay
+frames use the same path. No EAGL composition code changed.
+
+SystemInfo confirms default headless gpu_compositing=disabled_software. A bounded
+launch probe with --enable-gpu --ignore-gpu-blocklist --use-gl=angle
+--use-angle=swiftshader --enable-unsafe-swiftshader reports compositing/raster/
+WebGL enabled with the same CPU-based SwiftShader renderer. Vulkan-enabled
+variant also initializes; prefer the simpler non-Vulkan flag set for comparison.
+Logs target/gpu-compositing-probe.log and target/jit-chromium-gpu-info.json.
+This is not hardware acceleration validation. Add optional BROWSER_ARGS JSON
+string-array support to inspect-ipa and test-runtime, keeping default launch
+unchanged. Record flags separately for each performance result.
+
+
+All nine forced-JIT graphics fixtures pass twice with the explicit SwiftShader
+compositor flags, zero compiler failures and local GET-only traffic (logs
+target/jit-gpu-compositor-<fixture>.log). Harness syntax, cargo fmt and diff checks
+pass. Fresh clean game comparison started with the same flags and production
+b44f389c runtime. Treat this as a separate browser configuration, not a code
+speedup or hardware-GPU result. Avoid competing builds/benchmarks.
+
+
+Explicit SwiftShader GPU-compositor game (same b44f389c code): menu142 s;
+Training229 to Play382 =153 s versus137 s default. First60 s after Play:47 FPS
+samples, median5.10, range0.53–7.90 (default49 samples,3.28 median). Different
+scene progression and large range limit interpretation; no sustained real-time
+claim. Both lessons SUCCESS442/592 s; driver matched Lesson2 at572 s; actual
+zoom/placement verified. Logs target/jit-gpu-compositor-{game,driver}.log and
+local screenshots target/browser-jit-gpu-compositor. Alternative configuration
+improves this FPS observation but worsens loading; keep default launch unchanged.
+
+Post-acceptance15 s trace:141250 events, no GLES2::ReadPixels intervals. Live
+WebGL1/2 API counters both0. Worker Finish waits6687.82 ms now overlap state
+queries: GetTexParameterfv2374.12 ms/349, GetIntegerv1616.37/295, GetFloatv
+1610.35/408, GetRenderbufferParameteriv1119.43/118. GPU MakeCurrent3764.93 ms/490.
+These nested wall durations are not additive CPU costs. Logs/artifacts
+target/jit-gpu-compositor-{graphics-trace,graphics-summary,readback-counts}.*.
+This rules out changing EAGL composition on the evidence collected: browser
+software presentation caused the earlier readback wait. Next inspect conservative
+caching of measured anisotropy queries, preserving texture mutations, invalid
+queries, context lifetime and the native reference. No graphics implementation
+change made yet. Both inspectors stopped through UI (exit1); drivers exit0.

@@ -3,7 +3,12 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+// Diagnostic launch flags must be recorded alongside performance results.
+const browserArgs = JSON.parse(process.env.BROWSER_ARGS || '[]');
+if (!Array.isArray(browserArgs) || browserArgs.some(arg => typeof arg !== 'string'))
+  throw new Error('BROWSER_ARGS must be a JSON array of strings');
+console.log('Browser extra arguments:', JSON.stringify(browserArgs));
+const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', ...browserArgs] });
 try {
   const page = await browser.newPage();
   const requests = [], errors = [];
