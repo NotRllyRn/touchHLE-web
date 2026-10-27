@@ -90,3 +90,61 @@ Opaque pointer materialization patch under target/opaque-ptr-prototype-20261027
 has14 static checks; separate-source build validation delegated
 (tinker-pointer-op-build-20261027-5). Neither experiment touches production.
 Do not claim static frontend removal or broaden supported helpers before proof.
+
+## Latest checkpoint (supersedes pending experiments above)
+
+Production runtime/TCI compiler remains61301008. Current tracked increment fixes
+CDP reconnect profiling (same worker session for snapshots/samples, unique page/
+worker/context/origin selection);59 JS tests and actual reconnect sampling pass.
+Docs now include measured Training01 loading attribution and prototype results.
+No delegated tasks remain active at this checkpoint. All diagnostic games and
+fixture8766 server stopped; localhost8765 still serves web/dist. No public server.
+
+Most important new evidence: selected-level15.244s sample in
+`target/opt-profile-training01-retry/`. Generated self5.774s, two CPU dispatch
+self3.320s, frontend inclusive0.633s, compiler inclusive1.709s. Top guest symbol
+attributions: image scaling1.596s, inflate_fast0.989s, PNG filtering0.487s, MDCT
+butterflies0.483s. Asset processing inside guest code IS material, despite low
+host miniz time. Phase is actual loading, verified frozen stage-select screenshot;
+not a clean acceptance trial (diagnostics/concurrent builds). Initial CDP attempt
+failed due absent Playwright worker wrappers; fixed using same-session CDP eval.
+
+`target/opaque-ptr-validation/`: original pointer patch passes full Wasm suite
+on/off/define-omitted,35251 checked immediates; synthetic rebasing/spills/helper
+pairs/unknown rejection pass. Native copied Unicorn smoke crashes identically
+with/without patch; separate native Dynarmic backend wasn't changed/tested here.
+
+`target/tb-restore-prototype/`: complete in-memory archive patch from agent,
+synthetic ASan/UBSan and on/off syntax checks, no actual runtime checks there.
+Parent built/tested it in `target/tb-restore-validation/`, where authoritative
+latest source lives. Apply original opaque patch, restore patch, then parent
+`0003-runtime-guard-fixes.patch`. See README.md/final-hashes.json there.
+Actual interpreter/JIT passes cross-engine2 covered TB restores (zero-span exit
+still decodes), flush, host/guest writes, corruption, contract mismatch, fault PC.
+JIT50 modules, zero failures, clean reset. Parent fixes QEMU RAM offset vs guest
+address guard, cluster sentinel, setcond layout, effective max_insns identity.
+Both independent review findings match actual first-run failures. Unknown ops
+still reject. NOT serialized; only16 records, ARM-only/no hooks, no game support.
+97% of startup contexts are Thumb, so broaden only with real IT/fault regressions.
+Adapt synthetic fixtures for changed host-backing/key signature before relying
+on them for parent-source testing. Execution overflow/retry remains untested.
+
+`target/two-tb-fusion/`: native linked fixture passes3 installed/retired regions,
+10179entries/9154edges, stops in both A/B and cleanup;32 focused tests pass.
+General suite threshold32 still fails coverage (unsupported candidate), recorded.
+`target/two-tb-benchmark/`: actual same-artifact A/B/A done with all other heavy
+work stopped. Warm357.701/340.421/354.693ms (~4–5% gain); cold407.556/423.529/
+406.101ms. First run fixed unexported HEAPU32 use; source manifest updated, native
+artifact unchanged. No production adoption or game claim.
+
+Next work:
+1. Extend isolated restore to Thumb and proven runtime-only adapter hooks with
+   targeted IT/fault/budget tests, then scale archive representation and add
+   exact-runtime import/export. Avoid adopting16-slot fixed arrays for the game.
+2. Use level profile to test representative image/decompression CPU blocks;
+   two-block integer fusion alone has only modest native benefit. Preserve all
+   invalidation and helper identity guards if extending eligibility.
+3. Reprofile/measure chosen optimization in comparable game phases, recapture
+   updated runtime, then >=3 clean trials/both lessons. No <10s/real-time claim.
+4. Keep goal active and full PRD acceptance intact; committed diagnostic/prototype
+   milestones are progress, not completion of offline whole-app compilation.

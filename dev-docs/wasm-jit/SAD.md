@@ -24,8 +24,9 @@ Two independent diagnostic modes avoid conflating observer cost with speed:
    coverage gaps and bounded metadata retention. Do not report these as ARM counts.
 
 Join sampled blocks with instruction/helper composition and compile statistics.
-A later explicit translator metadata hook must provide guest PC/mode/bytes and
-ARM instruction boundaries before instruction-level ARM attribution is claimed.
+The translator metadata hook provides guest PC/mode and instruction search
+boundaries, including fault state. It does not capture instruction bytes or
+establish retired ARM instruction counts.
 Separate controlled CPU fixtures measure throughput by operation class with
 known counts, dependencies, memory alignment and FPSCR state. Browser sampling
 cannot provide exact nanoseconds for each guest instruction in optimized code.
@@ -49,6 +50,22 @@ Decode unobserved/dynamic code through the existing reference path. Never infer
 code coverage from a linear scan of mixed ARM/Thumb/data. Track frontend time and
 fallback coverage to determine whether this work pays for its complexity.
 
+The first restore experiment uses an exact-runtime, exact-address archive and
+fresh native TB allocation. Engine pointers are emitted through an opaque IR
+operation with explicit recipes for the engine, exit counter and budget field.
+The optimizer must treat these as runtime values; matching numeric addresses
+would incorrectly relocate equal-valued guest integers. Unknown pointer sources
+reject capture. Helper identities, internal labels, tagged TB exits, jump resets
+and the full search table need separate relocation and validation.
+
+Restored code rejoins ordinary page/hash registration, dirty-page handling and
+invalidation. No serialized ownership pointers are reused. Byte/state mismatch
+falls back to the translator and is counted. A small ARM-only in-memory fixture
+can prove this mechanism, but useful game coverage requires Thumb: the startup
+registration sample contains 310328 Thumb versus 10342 ARM contexts. Supporting
+Thumb must preserve IT/fault state and translator side effects; reject unsupported
+states explicitly rather than silently accepting incomplete metadata.
+
 ## Initialization and HLE
 
 Attribute host calls by both self and inclusive time: guest comparator callbacks
@@ -56,3 +73,11 @@ can make a cheap qsort host frame appear expensive. Identify repeated work and
 high-frequency guest/host crossings before optimizing. Preserve libc/ObjC behavior
 and thread/context semantics. Preload only if measured asset IO/decode latency
 is significant; account for memory and gameplay contention. No cloud execution.
+
+The first-level sample distinguishes host decompression from guest asset work:
+named guest blocks attributed to Ogre image scaling, zlib inflate, PNG filtering
+and FMOD decoding account for substantial execution. Cached IPA bytes do not
+eliminate these routines. Evaluate generated-code improvements against these
+workloads; any offline asset transformation would additionally need exact format,
+filtering, layout and game behavior equivalence. Do not infer that low host
+inflate time means all asset processing is cheap.

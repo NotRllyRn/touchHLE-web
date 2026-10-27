@@ -325,8 +325,10 @@ counts cannot be divided into sampled time to infer instruction latency.
 
 `TCI_PROFILE_MODE=timing|counts node web/inspect-ipa.mjs` installs diagnostics
 before game startup. Attach `web/profile-runtime.mjs` later with `PROFILE_CDP`
-and the matching mode to inspect a selected scene. Only one emulator worker may
-be active in that browser. Do not combine `TCI_PROFILE_MODE` and
+and the matching mode to inspect a selected scene. Use a browser with exactly
+one page and one runtime worker; both must share the context and origin.
+Snapshots and samples use the same CDP worker session, including reconnects.
+Do not combine `TCI_PROFILE_MODE` and
 `INSPECTION_OPTIONS` (both intercept worker loading). Cached-module profiling is
 explicitly rejected: use the JIT reference until cached instrumentation exists.
 Routed compiler hashes identify installed diagnostic sources; local runtime/IPA

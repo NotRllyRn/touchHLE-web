@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { installProfileRoutes } from './profile-instrumentation.mjs';
 import { summarizeProfile, profileWindow } from './profile-report.mjs';
 import { fingerprint } from './precompile-files.mjs';
+import { selectProfileWorker, readProfileWorker } from './profile-worker.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const ipa = process.env.TEST_IPA;
 if (!ipa && !process.env.PROFILE_CDP) throw new Error('TEST_IPA must identify a locally owned IPA');
@@ -44,9 +45,7 @@ try {
   await page.waitForTimeout(Number(process.env.PROFILE_DELAY_MS || 10000));
   const cdp = await browser.newBrowserCDPSession();
   const { targetInfos } = await cdp.send('Target.getTargets');
-  const targets = targetInfos.filter(target => target.type === 'worker' && target.url.endsWith('/runtime-worker.js'));
-  if (targets.length !== 1) throw new Error('Expected exactly one runtime worker in this browser; close other emulator tabs');
-  const target = targets[0];
+  const target = selectProfileWorker(targetInfos, page.url());
   const { sessionId } = await cdp.send('Target.attachToTarget', {targetId: target.targetId, flatten: false});
   let id = 0;
   const pending = new Map();
@@ -64,11 +63,9 @@ try {
     pending.set(key,{resolve,reject,timer});
     cdp.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id:key,method,params})}).catch(reject);
   });
-  const worker = page.workers().find(worker => worker.url().endsWith('/runtime-worker.js'));
-  if (!worker) throw Error('Runtime worker does not belong to the selected page');
-  const snapshot = async () => JSON.parse(await worker.evaluate(() => JSON.stringify(self.__tciProfile ? {
+  const snapshot = () => readProfileWorker(send, `JSON.stringify(self.__tciProfile ? {
     ...self.__tciProfile.snapshot(), snapshotTimeMs: performance.now(),
-  } : null)));
+  } : null)`);
   const before = await snapshot();
   profileWindow(before, before, mode); // Reject missing/mismatched instrumentation before sampling.
   await send('Profiler.enable'); await send('Profiler.start');
@@ -78,7 +75,7 @@ try {
   await writeFile(`${output}/worker.cpuprofile`,JSON.stringify(profile));
   const windowProfile = profileWindow(before, after, mode);
   if (windowProfile) await writeFile(`${output}/counts.json`, JSON.stringify(windowProfile, null, 2));
-  const routedSourceIdentity = await worker.evaluate(() => self.__tciProfileIdentity ?? null);
+  const routedSourceIdentity = await readProfileWorker(send, 'JSON.stringify(self.__tciProfileIdentity ?? null)');
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const identity = Object.fromEntries(await Promise.all(['tci-jit.js', 'tci-profile.mjs', 'tci-guest-map.mjs'].map(async name =>
     [name, hash(await readFile(new URL(name, import.meta.url)))])));

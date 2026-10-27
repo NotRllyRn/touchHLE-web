@@ -3552,3 +3552,134 @@ unknown constructors reject capture.14 static checks pass; C build/actual
 optimizer/allocator/relocation proof is pending in a separate ignored source tree.
 It does not yet implement helper/label/exit/link relocations or TB restoration.
 No production optimization adopted by these experiments; broad goal remains open.
+
+## 2026-10-27: native prototype validation and selected-level profile
+
+The static package regression against the metadata-enabled runtime passes:
+`node web/build.mjs`, then `PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs node web/precompile-ipa.mjs target/browser-mipmap-test.ipa target/aot-mipmap-profile --seconds 15 --threshold 1`.
+Capture produced40 templates,77957 Wasm bytes and136981 archive bytes. Serving
+that fixture on127.0.0.1:8766 and running `TEST_URL='http://127.0.0.1:8766/?jitThreshold=1' PLAYWRIGHT_MODULE=... node web/test-precompiled.mjs` passes twice,
+130/130 precompiled instances, zero misses/failures, including game-only UI and
+corruption rejection. Logs opt-profile-{web-sync,package,package-browser}.log.
+Build/capture overlapped other work; its6.862s duration is not performance evidence.
+The fixture server was stopped; no public emulator listener is running.
+
+Opaque pointer lowering is now compiled and runtime-tested, entirely under
+`target/opaque-ptr-validation`. The original prototype patch was unchanged.
+Capture enabled/disabled and build define omitted all pass the full Wasm CPU
+suite. Enabled run checks35251 relocation immediates against their real engine
+addresses. Synthetic execution preserves equal-valued integer literals during
+second-engine pointer rebasing, with41 actual spills/reloads, helper argument
+pairs, dead unknown rejection, overflow rejection and default-off byte equality.
+An initial260-simultaneously-live-pointer test exceeded TCG's128-word scratch
+frame; the fixture was corrected to test quota overflow sequentially, retaining
+the40-live-pointer spill test. Native compilation of the copied Unicorn backend
+passes, but its smoke executable segfaults both with and without the prototype
+in the same helper adapter chain. That is not a native correctness pass and does
+not test this project's separate native Dynarmic backend. Commands, baseline
+failure, logs and scope: target/opaque-ptr-validation/{REPORT,COMMANDS}.md.
+
+The two-TB native owner now has real coverage. Initial threshold1 test had zero
+candidates; threshold32 discovers one but rejects unsupported operations, so the
+general CPU opt-in coverage assertion still fails. An original three-block ARM
+fixture linked against the unchanged CPU library naturally chains an eligible
+pair. Normal and fused execution pass register/SVC assertions with budgets1024
+and7, requiring25/3073 slices. Fused mode installs/retires3 regions, records10179
+entries and9154 internal edges, and exercises stops in both constituents. All32
+focused tests and ordinary CPU suite pass. This is real native-table correctness,
+not throughput or game acceptance. Exact artifact-specific helper audit, failures
+and commands: target/two-tb-fusion/CONTRACT.md. No production fusion is installed.
+
+The complete in-memory restore prototype was then built separately under
+`target/tb-restore-validation`, using the opaque patch and
+`target/tb-restore-prototype/0002-exact-runtime-tb-capture-restore.patch`.
+First build failed because the copied snapshot omitted the newly added header;
+copying all five changed files fixes it (build.log/build-2.log). First real run
+failed capture coverage. Two guards rejected every valid block: QEMU RAM offsets
+were compared with guest addresses, and the default cluster sentinel0xff000000
+was treated as an unsupported cflag. Fixed in the validation copy: require valid
+RAM and equality between resolved host backing and the direct-read page pointer;
+exclude cluster bits only from the unsupported-flag test while preserving full
+cflags in the key. Added the actual effective instruction limit to the key, so
+translation overflow retries cannot reuse a different limit. Added validated
+setcond_i32 layout, required by the original ARM loop; unknown layouts still
+reject. The parent changes remain isolated from active sources and builds.
+
+`node target/tb-restore-validation/run.cjs` and `RESTORE_JIT=1 node target/tb-restore-validation/run.cjs` pass real capture/restore. Two simultaneously live engines
+have separate mappings/engine storage. The second restores both positive-size
+loop TBs; only the zero-span end-address TB still decodes. Flush/republication,
+host instruction writes and guest stores into restored code produce correct new
+results. Guest/TCI/search corruption rejects and decodes normally. Changed
+configuration contract gets zero restores. A restored faulting load reports the
+correct unmapped-read error and guest PC, with one capture/one restore/one decode
+across both engines. JIT run compiles50 modules with zero failures and resets to
+zero live modules/bytes. Expanded logs run-expanded{,-jit}.log; final identity-limit
+checks run-final-{off,on}.log. This is a16-entry, in-memory, exact-module ARM
+prototype. It has no disk format, Thumb coverage, real-adapter hook support or
+game integration. It is not yet the requested offline whole-app compiler.
+
+Re-examining the full startup registration sample finds310328 Thumb and10342 ARM
+contexts (flags bit8), with no omissions. Thus ARM-only restore cannot address
+most cold initialization. Thumb/IT state and the real adapter's interrupt/fault
+hooks are next compatibility gates; preserve conservative rejection meanwhile.
+
+### CDP reconnect fix and first-level evidence
+
+The first selected-level collection failed with `Runtime worker does not belong
+to the selected page`: Playwright reconnect enumerated the existing page but
+returned an empty page.workers(), while CDP exposed its worker. Fixed diagnostics
+to use the same CDP session for snapshots, identities and sampled CPU time.
+Selection requires exactly one page and one runtime worker sharing context and
+origin; ambiguous browsers are rejected. New tests cover selection mismatch,
+missing/duplicate workers/pages and failed/malformed evaluations. All59 JS tests,
+`node --check web/profile-runtime.mjs`, formatting and diff checks pass. Logs
+opt-profile-cdp-{tests,all-tests}.log. No production runtime changes.
+
+A reconnect smoke profile succeeds during Training01 simulation:
+opt-profile-training01-simulation,15.524s sample,10.530s idle. This is NOT the
+level-load sample. A fresh diagnostic run then captures the actual loading phase:
+
+- `TCI_PROFILE_MODE=timing INSPECTION_DIR=target/opt-profile-level-retry INSPECTION_PORT=9243 RUN_SECONDS=600 TEST_URL='http://127.0.0.1:8765/?cpu=jit' PLAYWRIGHT_MODULE=... node web/inspect-ipa.mjs '/root/local-ipas/TinkerBox HD 1.4.1.ipa'`.
+- Existing screenshot driver selects Training01 (input after canvas192s). Five
+  seconds later, attach with `PROFILE_CDP=http://127.0.0.1:9243 PROFILE_MODE=timing PROFILE_DELAY_MS=1 PROFILE_MS=15000 PROFILE_PHASE=training01-after-selection PROFILE_DIR=target/opt-profile-training01-retry PLAYWRIGHT_MODULE=... node web/profile-runtime.mjs`.
+- Sample15.244s, wall15.245s;15903 named metadata records, no drops/truncation.
+  Screenshot shows frozen stage-selection during loading. Driver later finds
+  playable scene at canvas342s. These diagnostic times include instrumentation,
+  screenshot cadence and concurrent isolated builds; not acceptance comparisons.
+
+Self-time: named generated blocks5.774s; cpu_exec_arm1.695s; TCI dispatcher1.626s;
+idle0.207s. Inclusive ARM translation0.633s and JS compiler1.709s; inclusive
+categories overlap their children and must not be added to self-time totals.
+Nearest preceding text-symbol attribution of named guest PCs yields image
+scaling1.596s, inflate_fast0.989s, PNG filtering0.487s, MDCT butterflies0.483s,
+inflate0.382s, FMOD MDCT0.248s, adler320.227s. These are sampled guest-block totals,
+not instruction latencies or exact function-boundary proof. Host miniz inflate
+has only~0.038s inclusive. Image/audio processing inside the guest is material:
+low host archive-decompression cost does NOT establish that all asset work is
+cheap. Ordinary byte preloading would leave this processing intact.
+
+Raw profiles, screenshots, symbols and owned executable remain ignored. Both
+diagnostic games were stopped through their Stop controls after collection;
+the second pending screenshot driver was terminated. No game-speed claim or
+new acceptance result follows from these diagnostic/prototype tests.
+
+### Serialized native fusion throughput
+
+After stopping diagnostic browsers and finishing builds/tests, ran
+`RUN_TWO_TB_NATIVE_BENCH=1 node target/two-tb-benchmark/run.mjs`. Initial harness
+failed reading unexported HEAPU32; corrected to use jit.memory.buffer, updating
+the harness identity only (same JS/Wasm artifact). Failure is retained in run.log.
+Second run passes all21 guest-result, slice-count, native-coverage and cleanup
+assertions. Three serial processes run original/fused/original, seven1M-iteration
+trials each, with the normal10000-instruction budget. One cold/six warmed trials
+are reported separately; timing excludes process/module/engine setup. Fusion's
+validity/entry/edge counters remain included, with no per-helper JS wrapper.
+
+Warmed medians357.701/340.421/354.693ms, approximately4–5% faster for fusion.
+Cold407.556/423.529/406.101ms (one sample each). This is substantially smaller
+than the modeled offline test and insufficient by itself to adopt a new general
+runtime path. Eligibility still excludes many actual game operations/edges.
+Raw trials, unchanged artifact identities, exact commands and limits are in
+target/two-tb-benchmark/{results.json,README.md}; native correctness remains
+separate from game throughput. No production fusion or precompiler speedup is
+claimed. Goal and game/device acceptance remain open.

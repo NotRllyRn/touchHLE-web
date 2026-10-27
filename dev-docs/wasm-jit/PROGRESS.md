@@ -43,6 +43,22 @@ cold phase. Isolated two-body fusion median77.2ms versus129.6/144.4ms original
 in a modeled-helper/JS-dispatch fixture; native and game integration unproven.
 Opaque pointer relocation prototype is undergoing isolated build validation.
 
+Follow-up: opaque pointer lowering passes the full Wasm CPU suite with capture
+on/off and omitted build define. Real isolated ARM TB restoration now passes
+interpreter/JIT cross-engine reuse, cache flush, host/guest code changes,
+corruption fallback and fault-PC recovery. It is not integrated or serialized;
+Thumb and the real adapter's hooks remain unsupported. Native fused dispatch
+also now has actual execution/budget coverage. Native A/B/A warmed medians
+357.701/340.421/354.693ms show only4–5% improvement on the three-block loop;
+fusion remains experimental, with representative game eligibility unproven.
+
+Selected-level timing captured after fixing CDP reconnects (59 JS tests pass).
+In 15.244s: generated code5.774s self, cpu_exec/TCI dispatcher3.320s combined
+self, ARM translation0.633s inclusive, compiler1.709s inclusive. Symbol-based
+guest attribution identifies image scaling, inflate, PNG filtering and audio
+decoding. Startup and level loads need different optimizations. Diagnostic runs
+overlapped isolated builds and are not acceptance timings; details in browser.md.
+
 User hardware reference: M3 Max MacBook, 16-core CPU, 64 GB RAM. Browser/OS
 and precise FPS remain unverified; reported ~30 s loads are qualitative.
 
