@@ -3683,3 +3683,50 @@ Raw trials, unchanged artifact identities, exact commands and limits are in
 target/two-tb-benchmark/{results.json,README.md}; native correctness remains
 separate from game throughput. No production fusion or precompiler speedup is
 claimed. Goal and game/device acceptance remain open.
+
+### 2026-10-27 — Thumb restore and natural-alignment probe follow-up
+
+The isolated Thumb extension in `target/tb-restore-thumb` completes the bounded
+mixed16/32-bit Thumb2, IT condition/fault/resume, budget and runtime hook gate.
+`node target/tb-restore-thumb/run.cjs` and `RESTORE_JIT=1 node
+ target/tb-restore-thumb/run.cjs` pass equivalent execution transcripts. JIT149
+modules, zero failures, zero retained modules/bytes. A separate build omitting
+both prototype defines executes both ITE branches through the real adapter in
+interpreter/JIT. Exact build/link commands, failures and artifact hashes are in
+that directory's README.md, COMMANDS.md and final-hashes.json. These are reported
+child validation results; the parent did not repeat the builds during timings.
+Host writes use the existing explicit adapter invalidation API; uc_mem_write
+alone did not invalidate this snapshot. Remapping/protection, actual overflow
+recovery, native execution and full-game coverage remain untested. No production
+archive is enabled. Next: explicit binary export/import across fresh modules,
+then scalable storage and configuration identity before game integration.
+
+Natural-alignment probe: `RUN_ALIGNED_BOUNDARY_BENCH=1 node
+ target/aligned-boundary-probe/benchmark-aba.mjs` passed serial original/candidate/
+original native assertions after other builds and tests stopped. Exact artifact
+hashes and trials are in benchmark-results.json. With trial0 excluded, warmed
+medians in ms were memory48.373/51.132/47.836, data-memory6.182/5.892/5.624,
+library-memory5.625/5.762/5.548 and linked-blocks109.441/115.594/108.370.
+No consistent benefit; do not adopt. Cold and warm rows remain separate in raw
+results. Correctness probe had59 JS tests,14926 compiled modules per CPU variant,
+zero compiler failures, and8280 differential boundary comparisons, including
+word-aligned8-byte cross-page fallback. Emitted corpus bytes fell only3129 from
+15926226. The parent reran the production JS suite:59/59 pass in
+`target/continuation-js-tests.log`.
+
+Inspector now supports SCREENSHOT_SECONDS=1 (default10, allowed1–60) to narrow
+visual scene-transition observation intervals. Browser/screenshot scheduling
+still adds overhead; compare equal cadence and report bounds, not exact game
+readiness events. Syntax and existing JS checks pass; live verification is part
+of the ongoing asset experiment.
+
+Lossless PNG probe is prepared under target/lossless-png-probe. Nine synthetic
+checks, all514 image pixel/non-IDAT comparisons and all336 other entry byte
+comparisons pass. Candidate IPA97758051B versus83644753B; expanded PNGs300038727B
+versus67880048B. The current Rust loader retains decompressed IPA entries, so
+this can add232158679B (221.4MiB) if all images are opened. Filter0/stored IDAT
+moves decompression to the host ZIP reader but does not remove guest pixel
+conversion, scaling, CRC/Adler work or audio decoding. Browser performance and
+actual memory are unproven; preserve the original IPA and reject default adoption
+without a useful measured benefit. Signing metadata is unchanged and stale;
+this experimental browser asset is not claimed to be installable on iOS.

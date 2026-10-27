@@ -59,6 +59,18 @@ guest attribution identifies image scaling, inflate, PNG filtering and audio
 decoding. Startup and level loads need different optimizations. Diagnostic runs
 overlapped isolated builds and are not acceptance timings; details in browser.md.
 
+Thumb2 restoration now passes bounded mixed-width/IT/fault/runtime-hook fixtures
+in interpreter and JIT (149 modules, zero failures, clean teardown), including a
+separate build with the prototype defines omitted. It still lacks serialization,
+game coverage, remapping/protection and complete configuration identity. A fresh
+module binary-archive prototype is being prepared in isolation.
+
+Natural-alignment boundary-check elimination passed correctness but produced no
+consistent native benchmark gain; production compiler is unchanged. Offline
+lossless PNG preprocessing preserves all 514 images and 336 other IPA entries,
+but increases the IPA by16.87% and expanded PNG bytes by221.4MiB. Controlled
+game loading comparisons are in progress; no asset speedup is established yet.
+
 User hardware reference: M3 Max MacBook, 16-core CPU, 64 GB RAM. Browser/OS
 and precise FPS remain unverified; reported ~30 s loads are qualitative.
 

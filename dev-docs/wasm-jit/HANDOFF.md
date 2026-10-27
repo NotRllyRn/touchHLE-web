@@ -7,7 +7,7 @@ serialize benchmarks. Previous paused-goal limitation has been resolved.
 ## State
 
 - main, origin ssh://git@github.com/NotRllyRn/touchHLE-web.
-- Latest diagnostic checkpoint e57d24a5 pushed; previous baseline a3220587. Offline converter/player and immutable portable ABI3
+- Latest diagnostic checkpoint b2d36270 pushed; previous baseline a3220587. Offline converter/player and immutable portable ABI3
   work, but browser still decodes ARM and falls back to JIT for uncaptured blocks.
 - User's M3 Max16-core/64 GB MacBook reportedly loads levels in~30s and plays
   near full speed; browser/OS and precise FPS not verified. Development host is
@@ -148,3 +148,24 @@ Next work:
    updated runtime, then >=3 clean trials/both lessons. No <10s/real-time claim.
 4. Keep goal active and full PRD acceptance intact; committed diagnostic/prototype
    milestones are progress, not completion of offline whole-app compilation.
+
+After checkpoint b2d36270 (pushed), Thumb/hook restoration and aligned-boundary
+probes completed. target/tb-restore-thumb/README.md records149 JIT modules with
+zero failures, interpreter parity and successful defines-omitted execution.
+Host writes require explicit adapter invalidation. No full CPU/game/native or
+remapping/protection acceptance yet. target/aligned-boundary-probe native A/B/A
+shows no consistent speed gain; do not adopt the compiler change.
+`...tinker-archive-codec-20261027-14` owns target/tb-archive-codec, preparing
+explicit LE export/import and fresh-module tests from the final Thumb snapshot.
+It is instructed not to build/test while parent runs serialized game timings.
+target/lossless-png-probe contains verified filter0/stored PNG candidate IPA;
+514 images and336 other files preserved, IPA+16.87%, expanded PNGs+221.4MiB.
+Parent target/run-asset-load.mjs and target/asset-load-driver.py compare visual
+checkpoints at1s cadence with identical production runtime/JIT. All artifacts
+and raw traces remain ignored. No speed/memory acceptance established yet.
+Full task IDs are in ignored target/optimization-active-handoff.json.
+Archive-design review `...tinker-restore-archive-design-20261027-11` completed:
+explicit LE variable records/index, enforce full runtime/config identity,
+validate atomically before publication, fresh-module roundtrip before scaling.
+Do not serialize native structs/ownership or raise fixed-array/cache limits alone.
+Goal remains active; these tasks are not complete game acceptance.

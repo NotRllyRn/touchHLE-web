@@ -39,3 +39,30 @@ Graphics/audio/input: relevant existing fixtures and real TinkerBox lesson input
 Package: capture identity, current compiler, corrupt payloads, immutable outputs,
 Play/Stop fresh worker lifecycle, no upload form or runtime server dependence.
 All proprietary output stays ignored under target/ or outside the repository.
+
+## Restore implementation sequence
+
+1. Prove typed pointer materialization and complete TB relocation across two live
+   engines, including equal-valued scalar constants, faults, budget accounting,
+   flushes and host/guest code changes. The isolated ARM prototype passes this
+   bounded gate; zero-span exit blocks still decode.
+2. Prove Thumb mixed widths, IT fault/resume and the actual adapter's runtime-only
+   interrupt/invalid-memory hooks. Translation-affecting hooks remain rejected.
+3. Add explicit little-endian records with variable payloads and a bounded index.
+   Do not serialize C struct padding, native pointers, jump chains or hash tables.
+   Verify full runtime/CPU configuration identity, framing, checked lengths,
+   canonical TCI/search/relocations and duplicate keys before atomic attachment.
+   Reject malformed imports without replacing the previously accepted archive.
+4. Export, destroy the producing Wasm module, instantiate a fresh identical
+   module, import and execute with JIT disabled/enabled. Same-process cross-engine
+   reuse alone does not establish offline persistence or fresh helper identities.
+5. Measure bytes, staging/retained memory, import latency, lookup work and fallback
+   decodes at small and representative capture sizes. Stop capture with explicit
+   quota omissions. Do not scale by raising fixed record/module-array limits.
+6. Connect validated restoration to offline Wasm generation, retaining correct
+   bindings for canonical pointer recipes, helper IDs and fresh TB exits. Run the
+   full package, phase and game acceptance gates before enabling it by default.
+
+Archive checksums detect accidental corruption, not the provenance of executable
+TCI. Initially accept locally captured compiler output with exact identities;
+retain live guest-byte and mapping checks regardless of the IPA fingerprint.

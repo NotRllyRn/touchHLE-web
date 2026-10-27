@@ -7,12 +7,16 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const ipa = process.argv[2];
 if (!ipa) throw new Error('Usage: node web/inspect-ipa.mjs /absolute/path/to/app.ipa');
 const output = process.env.INSPECTION_DIR || fileURLToPath(new URL('../target/browser-inspection/', import.meta.url));
+const screenshotSeconds = Number(process.env.SCREENSHOT_SECONDS || 10);
+if (!Number.isInteger(screenshotSeconds) || screenshotSeconds < 1 || screenshotSeconds > 60)
+  throw Error('SCREENSHOT_SECONDS must be an integer from 1 to 60');
 await mkdir(output, { recursive: true });
 // Diagnostic launch flags must be recorded alongside performance results.
 const browserArgs = JSON.parse(process.env.BROWSER_ARGS || '[]');
 if (!Array.isArray(browserArgs) || browserArgs.some(arg => typeof arg !== 'string'))
   throw new Error('BROWSER_ARGS must be a JSON array of strings');
 console.log('Browser extra arguments:', JSON.stringify(browserArgs));
+console.log('Screenshot interval seconds:', screenshotSeconds);
 const args = ['--no-sandbox', ...browserArgs];
 if (process.env.INSPECTION_PORT) {
   const port = Number(process.env.INSPECTION_PORT);
@@ -137,7 +141,7 @@ try {
     }
     if (second >= nextScreenshot) {
       await page.locator('#canvas').screenshot({ path: join(output, `canvas-${second}.png`) });
-      nextScreenshot = second + 10;
+      nextScreenshot = second + screenshotSeconds;
     }
     if (await page.locator('#stop').isDisabled()) {
       const status = await page.locator('#status').textContent();

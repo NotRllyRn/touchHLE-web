@@ -334,6 +334,11 @@ explicitly rejected: use the JIT reference until cached instrumentation exists.
 Routed compiler hashes identify installed diagnostic sources; local runtime/IPA
 fingerprints are references, not proof of remote or already-loaded worker bytes.
 
+`SCREENSHOT_SECONDS=1` gives the inspector finer scene-transition observations
+(default 10, allowed 1–60). The loop still samples at roughly one-second intervals;
+screenshots and browser scheduling add overhead. Keep cadence identical between
+compared runs and report the observation bounds, not exact engine event times.
+
 Counts mode also exports cumulative translation-registration contexts keyed by
 PC, flags and guest byte span. Repeated contexts do not prove identical code or
 safe restoration: full translation flags and byte validation are separate work.
