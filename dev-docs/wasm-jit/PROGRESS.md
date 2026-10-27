@@ -36,6 +36,13 @@ maps with zero errors/drops. Full runtime rebuild passes. Forward-join
 prototype rejected after no consistent targeted speedup. Two-block fusion probe
 under review; production execution remains unchanged. Details in ../browser.md.
 
+Registration counts clarify early startup:321287 translations,320670 distinct
+PC/flags/span contexts, no omissions. About310159 contexts map to C++ static
+initializers by preceding text symbol. Larger caches are unlikely to address this
+cold phase. Isolated two-body fusion median77.2ms versus129.6/144.4ms original
+in a modeled-helper/JS-dispatch fixture; native and game integration unproven.
+Opaque pointer relocation prototype is undergoing isolated build validation.
+
 User hardware reference: M3 Max MacBook, 16-core CPU, 64 GB RAM. Browser/OS
 and precise FPS remain unverified; reported ~30 s loads are qualitative.
 

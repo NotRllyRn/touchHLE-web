@@ -331,3 +331,9 @@ be active in that browser. Do not combine `TCI_PROFILE_MODE` and
 explicitly rejected: use the JIT reference until cached instrumentation exists.
 Routed compiler hashes identify installed diagnostic sources; local runtime/IPA
 fingerprints are references, not proof of remote or already-loaded worker bytes.
+
+Counts mode also exports cumulative translation-registration contexts keyed by
+PC, flags and guest byte span. Repeated contexts do not prove identical code or
+safe restoration: full translation flags and byte validation are separate work.
+`registrationStats.omittedContexts` marks bounded-table overflow. Snapshots travel
+as JSON strings to avoid excessive browser-protocol serialization overhead.

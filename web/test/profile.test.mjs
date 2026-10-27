@@ -182,3 +182,19 @@ test('helper call-site counts include inlined operations without claiming helper
   assert.match(result.callSiteMeaning, /not actual helper/);
   assert.match(result.blockEntryMeaning, /same-block goto loops/);
 });
+
+test('translation counts distinguish contexts and explicitly bound retention', () => {
+  const p = new TciProfile({ counts: true, limit: 2 });
+  const f = fixture(p, exit()), metadata = { guestPc: 4096, guestSize: 4, flags: 0 };
+  f.jit.register(1024, 10, metadata); f.jit.register(1024, 10, metadata);
+  f.jit.reset(); f.jit.register(1024, 10, { ...metadata, flags: 256 });
+  f.jit.register(1024, 10, { ...metadata, guestPc: 4100 });
+  f.jit.register(1024, 10);
+  const result = p.snapshot();
+  assert.deepEqual(result.registrationStats, { total: 5, tciBytes: 50, repeatedContexts: 1,
+    omittedContexts: 1, missingMetadata: 1 });
+  assert.deepEqual(result.translationContexts.map(row => row.translations), [2, 1]);
+  assert.match(result.translationMeaning, /does not prove identical code/);
+  const timing = new TciProfile(); timing.register(metadata, 10);
+  assert.equal(timing.snapshot().registrationStats, null);
+});

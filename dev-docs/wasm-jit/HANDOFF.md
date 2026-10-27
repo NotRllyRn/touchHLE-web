@@ -7,7 +7,7 @@ serialize benchmarks. Previous paused-goal limitation has been resolved.
 ## State
 
 - main, origin ssh://git@github.com/NotRllyRn/touchHLE-web.
-- Latest baseline a3220587. Offline converter/player and immutable portable ABI3
+- Latest diagnostic checkpoint e57d24a5 pushed; previous baseline a3220587. Offline converter/player and immutable portable ABI3
   work, but browser still decodes ARM and falls back to JIT for uncaptured blocks.
 - User's M3 Max16-core/64 GB MacBook reportedly loads levels in~30s and plays
   near full speed; browser/OS and precise FPS not verified. Development host is
@@ -72,3 +72,21 @@ compiler remains baseline apart from diagnostic hooks.
 4. Profile selected level transitions and actual helper callers; optimize measured
    work. Run clean repeated game trials and both lessons before game-speed claims.
 5. Keep goal active until actual acceptance; hardware GPU/mobile remains untested.
+
+
+## Follow-up experiments in progress
+
+Counts-only translation observer added;57 JS tests pass. JSON-string snapshot
+transport fixes large Playwright recursive serialization cost. Fresh diagnostic
+records321287 registrations/320670 contexts, no omissions;310159 contexts map to
+static initialization by text symbols. Exact evidence in browser.md; artifacts
+opt-profile-translation-counts-json/. Earlier large-object run completed slowly,
+not an acceptance measurement.
+
+Two-TB sparse-transfer prototype now passes24 tests. Offline modeled-helper
+A/B/A medians129.579/77.224/144.404ms, no native/game claim. Native dispatch
+lifecycle probe delegated (tinker-region-native-adapter-20261027-4).
+Opaque pointer materialization patch under target/opaque-ptr-prototype-20261027
+has14 static checks; separate-source build validation delegated
+(tinker-pointer-op-build-20261027-5). Neither experiment touches production.
+Do not claim static frontend removal or broaden supported helpers before proof.

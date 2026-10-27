@@ -18,6 +18,6 @@ export async function installProfileRoutes(page, mode) {
     if (data.precompiled) throw Error('Detailed profile requires the JIT reference path');
     const { TciProfile } = await import('./tci-profile.mjs');
     self.__tciProfileIdentity = ${JSON.stringify(identity)};
-    self.__tciProfile = TouchHLETciJit.profile = new TciProfile({ counts: ${mode === 'counts'} });`) });
+    self.__tciProfile = TouchHLETciJit.profile = new TciProfile({ counts: ${mode === 'counts'}, translationLimit: 524288 });`) });
   });
 }

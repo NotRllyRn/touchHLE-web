@@ -66,9 +66,9 @@ try {
   });
   const worker = page.workers().find(worker => worker.url().endsWith('/runtime-worker.js'));
   if (!worker) throw Error('Runtime worker does not belong to the selected page');
-  const snapshot = () => worker.evaluate(() => self.__tciProfile ? {
+  const snapshot = async () => JSON.parse(await worker.evaluate(() => JSON.stringify(self.__tciProfile ? {
     ...self.__tciProfile.snapshot(), snapshotTimeMs: performance.now(),
-  } : null);
+  } : null)));
   const before = await snapshot();
   profileWindow(before, before, mode); // Reject missing/mismatched instrumentation before sampling.
   await send('Profiler.enable'); await send('Profiler.start');

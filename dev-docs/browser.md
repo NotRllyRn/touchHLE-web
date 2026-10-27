@@ -3493,3 +3493,62 @@ Updated full-runtime `TEST_MIPMAP=1 TEST_URL='http://127.0.0.1:8765/?cpu=jit&jit
 PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
 node web/test-runtime.mjs` passes two fresh runs, clean guest exit, zero compiler
 failures/page errors and static GET-only traffic (opt-profile-metadata-hle.log).
+
+## 2026-10-27: cold initialization attribution and region probe
+
+Added a counts-only registration observer: cumulative translations/TCI bytes,
+repeat counts for exact PC+flags+guest-span contexts, missing metadata and
+bounded omitted contexts. These identities intentionally exclude code bytes and
+cflags, so repetition is not proof of safe TB reuse. Ordinary timing mode has
+no registration counting. `translationLimit` is separate from compiled-block
+retention; diagnostic harness uses524288 contexts. Limits are exported.
+57 JS tests pass, including changed flags, reset/address reuse, absent metadata
+and table overflow (target/opt-profile-registration-final.log).
+
+Initial32k-context run records327378 registrations,123919589 emitted TCI bytes,
+567 repeats but294043 omissions. Do not infer whole-run reuse from that truncated
+table. Raising the bound exposed expensive Playwright object serialization:
+first full run eventually completed in133.062s; counter boundaries span49.028s
+although CPU sample remains~15s. Stop was requested after it had already finished.
+Its data is retained as target/opt-profile-translation-counts-full; not timing
+acceptance. Change snapshot transfer to one JSON string instead of Playwright's
+recursive object protocol. Fresh run finishes in43.162s with17.464s counter
+window (still distinct from sample duration).
+
+Reproduce fresh run with prior counts command, PROFILE_PHASE=
+startup-translation-reuse-full, PROFILE_DIR=target/opt-profile-translation-counts-json.
+At snapshot:321287 registrations,119783454 TCI bytes,320670 distinct contexts,
+617 repeated contexts, zero omissions/missing metadata. Captured counts reflect
+intrusive instrumentation, not an identical game phase to timing mode. The lack
+of repeated contexts strongly weakens a larger-TCI-cache hypothesis for this
+part of startup. CPU sample separately establishes translation's cost.
+
+Local llvm-nm attribution against owned executable symbols puts310159 registered
+contexts under functions named __static_initialization_and_destruction_0(int,int)
+(aggregated across many distinct addresses). Attribution uses the nearest preceding
+text symbol within the actual Mach-O text range; it is not a measured per-function
+time. Source/executable/symbol dump remain ignored. This explains a large amount
+of one-time C++ initialization code to decode, not an asset preload bottleneck.
+Emsdk llvm-objdump lacks an ARM disassembler (attempt failed); local Capstone was
+installed under /tmp/touchhle-disasm for read-only examination, no repo dependency.
+Runtime Wasm name/table inspection maps11776184 helper-site visits to exit-request
+checks,418499 to exception-with-syndrome,680 to clz and154 to budget-stop.
+The exit-check site is normally inlined; these are not actual helper-call counts.
+
+Sparse two-TB prototype passes24 synthetic/captured-body tests (parent repeated:
+node --test target/two-tb-fusion/{fusion,real-fixture}.test.mjs,
+log opt-two-tb-tests.log). Real bodies were captured through the CPU suite but
+links are deliberately patched and helpers modeled in the offline fixture.
+`node target/two-tb-fusion/bench-aba.mjs` runs1M pairs,7 trials per variant:
+original/fused/original medians129.579/77.224/144.404ms; bytes1402 vs1244.
+Timing includes JS dispatch and has tiering spread; this is NOT native fused
+integration or a game-speed claim. Promising enough to test native dispatch
+slot ownership and dependency retirement next, still only under ignored target/.
+
+Pointer provenance research produced an isolated opaque-pointer IR prototype
+under target/opaque-ptr-prototype-20261027. It prevents optimizer/address-value
+conflation and tags CURRENT_UC, CURRENT_CPU_ICOUNT_DECR_U32, CURRENT_UC_BUDGET;
+unknown constructors reject capture.14 static checks pass; C build/actual
+optimizer/allocator/relocation proof is pending in a separate ignored source tree.
+It does not yet implement helper/label/exit/link relocations or TB restoration.
+No production optimization adopted by these experiments; broad goal remains open.

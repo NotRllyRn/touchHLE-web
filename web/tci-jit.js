@@ -65,6 +65,7 @@
       // Bound metadata/module retention, including permanently cold blocks.
       if (this.blocks.size >= 65536) { this.reset(); this.stats.metadataResets++; }
       this.stats.registered++;
+      this.profile?.register?.(guestMetadata, size);
       this.blocks.set(ptr, { size, count: 0, fn: 0, failed: false,
         generation: this.stats.registered, ...(guestMetadata ? { guestMetadata } : {}) });
     }
