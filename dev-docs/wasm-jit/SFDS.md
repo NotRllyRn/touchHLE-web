@@ -7,7 +7,9 @@ Updated2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
 - A0: Preserve tested browser baseline; stop public preview; record new objective.
 - A1: Relocatable compiler. Validate across different TCI addresses and memories,
   relocated branches, mutable links, helper GETPC/fault propagation, exit identities,
-  code mutation, cache reset, ABI mismatch and bounded retention. Existing JIT
+  code mutation, cache reset, ABI mismatch and bounded retention. Immutable
+  parameters must rebind after invalidation; import vectors over127 entries
+  require proper unsigned LEB128 encoding. Existing JIT
   output and behavior remain the default unless portable mode is selected.
 - A2: Offline CLI capture/compile/package. Emit actual Wasm, versioned metadata,
   content fingerprint and a static per-game player. No IPA chooser in output.

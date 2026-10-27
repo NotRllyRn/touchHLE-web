@@ -66,13 +66,17 @@ test('portable helper receives relocated PC and exceptions propagate', async () 
   assert.equal(pc,8192);
 });
 
-test('portable immediates use live values; changed opcodes miss and mismatched ABI rejects', async () => {
+test('portable immediates bind current values; changed opcodes miss and mismatched ABI rejects', async () => {
   const code=[...op('movi_i32',1,...word(17)),...exit(1)];
   const source=engine(1024,code),cache=await archiveOf(source,1024,code.length);
   const changed=[...op('movi_i32',1,...word(99)),...exit(2)];
   const e=engine(2048,changed);run(e,2048,changed.length,cache);
   assert.equal(e.view.getUint32(132,true),99);
   assert.equal(e.jit.stats.precompiled,1);assert.equal(e.jit.stats.precompiledMisses,0);
+  e.view.setUint32(2051,7,true); // Same location, changed immediate after invalidation.
+  run(e,2048,changed.length,cache);
+  assert.equal(e.view.getUint32(132,true),7);
+  assert.equal(e.jit.stats.precompiled,2);
   e.jit.reset();new Uint8Array(e.memory.buffer).set(exit(99),2048);
   run(e,2048,10,cache);
   assert.equal(e.jit.stats.precompiledMisses,1);
@@ -88,4 +92,12 @@ test('portable archive rejects malformed code, corrupt Wasm and duplicates', asy
   await assert.rejects(prepareCache({format:1,abi,blocks:[{key,wasm:'AAAA'}]}),WebAssembly.CompileError);
   const entry={key,wasm:encodeBytes(compileRecord(key,abi))};
   await assert.rejects(prepareCache({format:1,abi,blocks:[entry,entry]}),/Duplicate/);
+});
+
+
+test('portable blocks encode more than 127 immutable imports correctly', async () => {
+  const code=[...Array.from({length:150},(_,i)=>op('movi_i32',1,...word(i))).flat(),...exit(1)];
+  const source=engine(1024,code),cache=await archiveOf(source,1024,code.length);
+  const e=engine(4096,code);run(e,4096,code.length,cache);
+  assert.equal(e.view.getUint32(132,true),149);assert.equal(e.jit.stats.precompiled,1);
 });

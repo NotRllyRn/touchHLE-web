@@ -3265,3 +3265,45 @@ player runs twice each with all130/103 compiled instances precompiled,0 misses.
 Logs target/aot-{js-regressions,actual-cpu-final,mipmap-build,mipmap-browser,
 present-build,present-browser}.log. `cargo fmt --all -- --check`, JS syntax checks
 and git diff --check pass. No Rust/native implementation changed in this pivot.
+
+
+Optimized live-immediate package v3 clean run: preparation1,828.3 ms, menu
+checkpoint142 s, Training230 to Play372 =142 s. First60 s:48 FPS samples, median
+4.63, range0.54–8.49. Both lessons/pinch/placement/SUCCESS pass. Same package JIT
+reference (`?cpu=jit`): menu151 s, Training241 to Play389 =148 s;50 FPS samples,
+median3.825, range0.65–8.93. Both lessons pass. Through Play, last sampled
+compilation-related totals7,808.9 versus20,464.0 ms; precompiled preparation must
+be added separately. This is single-run evidence with10 s screenshots, not a
+stable FPS/speedup claim. Logs target/aot-{tinker-v3,jit-reference}-{game,driver}.log.
+
+Portable immutable-import experiment: current move-immediate values bound per
+instance, permitting loop hoisting while preserving cross-engine relocation and
+code invalidation. Isolated3-million-iteration loop with potentially aliasing
+guest stores, seven trials: ordinary JIT median5.913 ms, live-immediate portable
+7.510 ms, immutable-import portable6.773 ms, repeated live-immediate7.497 ms.
+All final counters/stored values match. This targeted~10% gain is not a predicted
+whole-game gain. Log target/aot-immutable-immediates-bench.log.
+
+First full CPU test found10 compilation failures on large blocks: import counts
+were incorrectly encoded as one byte above127 entries. Guest fallback still
+completed, but the zero-failure assertion correctly failed. Replaced count with
+ULEB128 and added a150-import regression. Final35 JS tests pass; real CPU/fiber
+capture and offline modes both pass:14,926 precompiled instances,0 misses/failures.
+Both mipmap and presentation package tests pass twice with all130/103 instances
+precompiled. Logs target/aot-immutable-{js-final,cpu-tests,cpu-final,large-imports}.log
+and target/aot-{mipmap,present}-globals-{build,browser}.log. ABI bumped to3.
+
+First immutable-import game attempt discarded because driver started late during
+terms-screen dwell. Stopped inspector/driver; new combined launcher starts both
+together (`target/run-tinker-package.py`). Clean run: preparation1,942.8 ms,
+menu133 s; Training229 to Play372 =143 s. First60 s:51 samples, median4.24,
+range0.60–8.95. Both lessons pass; placement and SUCCESS visually inspected.
+No whole-game gain claimed from this one comparison. All live diagnostic browsers
+were stopped before the next test. Logs target/aot-tinker-globals-clean-*.log.
+
+Test host reports Intel Core i9-13900H, x86_64,8 online logical CPUs; Chromium
+141.0.7390.37, SwiftShader software graphics with explicit compositor flags.
+No hardware-GPU, Firefox/WebKit or physical-phone result is inferred. Additional
+clean JIT/precompiled alternating loading trials are underway on the same final
+package to assess variation. Local harness target/repeat-tinker-loads.py stops
+after the first minute of Play; result rows target/aot-repeat-results.jsonl.

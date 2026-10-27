@@ -59,7 +59,7 @@ if(capture.format!==1||capture.identity?.ipa!==identity.ipa||
   throw Error('Capture does not match this IPA/core runtime build');
 if(!Array.isArray(capture.keys)||capture.keys.length>MAX_CACHE_BLOCKS||!capture.keys.length)
   throw Error('Empty or oversized capture');
-const abi=JSON.stringify({...JSON.parse(capture.abi),version:2});
+const abi=JSON.stringify({...JSON.parse(capture.abi),version:3});
 const blocks=[];let codeBytes=0,total=0;
 for(const key of new Set(capture.keys.map(key=>canonicalRecord(key,capture.abi)))){
   const bytes=compileRecord(key,abi);codeBytes+=bytes.length;total+=bytes.length+key.length;

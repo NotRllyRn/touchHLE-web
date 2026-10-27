@@ -249,7 +249,10 @@ runtime build to finish before testing or serving its JS/Wasm pair.
 
 The profile-assisted converter produces a static game page with no IPA chooser.
 It emits Wasm before play, reusing the same ARM/Thumb semantics and Rust HLE.
-Unseen blocks still use JIT; this is not yet a full-app static recompiler. Browsers
+Unseen blocks still use JIT. ARM-to-TCI decoding also remains in the browser
+to produce the exact current block identity; the offline artifact currently
+eliminates repeated TCI-to-Wasm generation for matching blocks. This is not yet
+a full-app static ARM recompiler. Browsers
 still compile the supplied Wasm to native code. Performance comparison is ongoing.
 
 With a built runtime and local Playwright available:
@@ -265,7 +268,7 @@ accepts the inspector's timed `{second,x,y}` actions to cover additional scenes;
 `INSPECTION_PORT` and its printed control JSON support live local diagnostics.
 Coverage depends on those actions. A prior captured trace can be reused with
 `--capture target/capture.json` when the IPA and core runtime fingerprints match.
-Capture format1 can be recompiled with newer portable code generation; it retains
+Capture formats1–3 can be recompiled with current portable ABI3 code generation; it retains
 TCI immediates and runtime ABI metadata, not executable host pointers to reuse.
 Output directories must be new; repo-local outputs must live below ignored target/.
 
@@ -287,3 +290,8 @@ For complete CPU/fiber regression coverage, build the shared CPU fixture first
 execution and compares capture versus offline modules through the real adapter.
 The converter's `--threshold 1` option forces compilation for short test IPAs;
 the ordinary game default remains32. Full static discovery is still pending.
+
+To reproduce the isolated full-payload decode/checksum comparison, serve a generated
+game directory and run `TEST_URL=http://127.0.0.1:8766/my-game/
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/bench-precompiled.mjs`.
+Keep game performance trials and this benchmark separate.

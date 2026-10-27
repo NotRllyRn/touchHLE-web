@@ -14,8 +14,9 @@ runtime benefit. It is not yet a whole-app static compiler.
 
 1. Existing runtime remains the semantic reference and fallback.
 2. Portable TCI compiler normalizes only known session-relative fields: forward
-   branch addresses, mutable goto links and exit-TB identities. Move immediates are also normalized and read from live TCI because
-   they contain engine-private pointers. Other immediates remain exact. An immutable imported base relocates helper PCs and link reads;
+   branch addresses, mutable goto links and exit-TB identities. Move immediates are also normalized because they contain engine-private
+   pointers. Portable ABI3 binds their current values as immutable imports at
+   instantiation; invalidation/re-registration rebinds them for the new block. Other immediates remain exact. An immutable imported base relocates helper PCs and link reads;
    exit identities are read from the current live TCI. No stale host pointer is
    trusted. Exact normalized bytes and ABI layout select a module, never hash-only.
 3. Offline capture records portable TCI and layout metadata for observed blocks;
@@ -24,7 +25,11 @@ runtime benefit. It is not yet a whole-app static compiler.
 4. Browser validates the package fingerprint, asynchronously compiles prebuilt
    modules, and instantiates matched blocks with current memory/base/helper imports.
    Existing invalidation, budgets and bounded live-function eviction still apply.
-   Cache misses retain JIT; counters expose actual coverage.
+   Cache misses retain JIT; counters expose actual coverage. ARM-to-TCI translation
+   still occurs in the browser to identify each live block. This milestone removes
+   Wasm generation for matches, not the entire ARM frontend. Eliminating that
+   stage requires exporting translation identities/state and safe guest-code
+   validation, and remains a separate architectural step.
 5. Local packager emits a game-only page and static assets. Shared worker/input/
    audio paths remain. No CDN, server execution or proprietary Git artifacts.
 

@@ -17,7 +17,7 @@ export const decodeBytes = text => {
 
 function decodeRecord(key, abi) {
   const layout = JSON.parse(abi);
-  if (![1, 2].includes(layout.version) || !Array.isArray(layout.names)) throw Error('Unsupported portable ABI');
+  if (![1, 2, 3].includes(layout.version) || !Array.isArray(layout.names)) throw Error('Unsupported portable ABI');
   const match = /^([0-3]):([A-Za-z0-9+/]*={0,2})$/.exec(key);
   if (!match) throw Error('Invalid portable block key');
   const code = decodeBytes(match[2]);

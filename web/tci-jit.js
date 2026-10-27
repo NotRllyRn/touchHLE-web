@@ -109,7 +109,7 @@
         this.stats.moduleMs += performance.now() - moduleStart;
         const instantiateStart = performance.now();
         const instance = new WebAssembly.Instance(module,
-          { e: { m: this.memory, s: this.step, c: this.dispatch?.call, b: ptr } });
+          { e: { m: this.memory, s: this.step, c: this.dispatch?.call, b: ptr, ...description?.bindings } });
         this.stats.instantiateMs += performance.now() - instantiateStart;
         if (cached) this.stats.precompiled++;
         this.portable?.capture?.({ ...description, abi: this.abi });
@@ -131,7 +131,7 @@
     }
     portableAbi() {
       const d = this.dispatch;
-      return JSON.stringify({ version: 2, names: this.names, call: !!d?.call,
+      return JSON.stringify({ version: 3, names: this.names, call: !!d?.call,
         readLayout: d?.readLayout, exitCheck: d?.exitCheck, floatMath: d?.floatMath,
         unaligned: d?.unaligned, pageMap: d?.pageMap, floatUnary: d?.floatUnary });
     }
@@ -139,7 +139,7 @@
       if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
         throw new Error('Invalid TCI block bounds');
       const code = new Uint8Array(this.memory.buffer, start, length).slice();
-      const view = new DataView(code.buffer);
+      const view = new DataView(code.buffer), bindings = {}; let immediate = 0;
       for (let offset = 0; offset < length;) {
         const size = code[offset + 1], name = this.names[code[offset]];
         if (!name || size < 2 || offset + size > length) throw new Error('Invalid TCI operation');
@@ -151,8 +151,9 @@
           const field = ((start + offset + 5) & ~3) - start;
           code.fill(0, field, field + 4);
         } else if (name === 'movi_i32') {
-          // Includes engine-private pointers (budget/stop fields). Read the
-          // current immediate in portable code instead of capturing an address.
+          // Includes engine-private pointers (budget/stop fields). Bind current
+          // values as immutable imports for this instance, never another engine.
+          bindings[`v${immediate++}`] = view.getUint32(offset + 3, true);
           code.fill(0, offset + 3, offset + 7);
         } else if (name === 'exit_tb') {
           code.fill(0, offset + 2, offset + size);
@@ -161,7 +162,7 @@
       }
       let binary = '';
       for (let i = 0; i < code.length; i += 8192) binary += String.fromCharCode(...code.subarray(i, i + 8192));
-      return { key: `${start & 3}:${btoa(binary)}` };
+      return { key: `${start & 3}:${btoa(binary)}`, bindings };
     }
     compile(start, length, portable = false) {
       if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
@@ -183,7 +184,7 @@
       const boundaries = new Set(ops.map(op => op.pc));
       if ([...targets].some(target => !boundaries.has(target))) throw new Error('Invalid branch target');
       const labels = [...targets].sort((a, b) => a - b);
-      const out = [];
+      const out = [], immediateImports = [];
       const emit = (...bytes) => out.push(...bytes);
       const get = i => emit(0x20, ...uleb(i));
       const set = i => emit(0x21, ...uleb(i));
@@ -228,7 +229,11 @@
           const dst = byte(); operand(); operand(); emit(binary[name]); put(dst);
         } else if (name === 'movi_i32') {
           const dst = byte();
-          if (portable) { codePointer(cursor); emit(0x28, 0, 0); word(); }
+          if (portable) {
+            emit(0x23, ...uleb(1 + immediateImports.length));
+            immediateImports.push([...str('e'), ...str(`v${immediateImports.length}`), 3, 0x7f, 0]);
+            word();
+          }
           else constant(word());
           put(dst);
         } else if (name === 'mov_i32') {
@@ -467,10 +472,10 @@
         ...section(1, [3, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 14, ...Array(14).fill(0x7f), 1, 0x7e]),
-        ...section(2, [(this.dispatch?.call ? 3 : 2) + (portable ? 1 : 0), ...str('e'), ...str('m'), 2, 0, 0,
+        ...section(2, [...uleb((this.dispatch?.call ? 3 : 2) + (portable ? 1 + immediateImports.length : 0)), ...str('e'), ...str('m'), 2, 0, 0,
           ...str('e'), ...str('s'), 0, 0,
           ...(this.dispatch?.call ? [...str('e'), ...str('c'), 0, 2] : []),
-          ...(portable ? [...str('e'), ...str('b'), 3, 0x7f, 0] : [])]),
+          ...(portable ? [...str('e'), ...str('b'), 3, 0x7f, 0, ...immediateImports.flat()] : [])]),
         ...section(3, [1, 1]),
         ...section(7, [1, ...str('run'), 0, this.dispatch?.call ? 2 : 1]),
         ...section(10, [1, ...uleb(body.length), ...body]),
