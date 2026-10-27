@@ -1,181 +1,122 @@
 # Optimizing offline compiler handoff
 
-Updated 2026-10-27. The renewed thread goal is active. User authorized continued
-implementation, commits/pushes and GPT-6.1 Sol medium subagents (at most4–5);
-serialize benchmarks. Previous paused-goal limitation has been resolved.
+Updated 2026-10-27. Goal active and unmet. User authorized implementation,
+commits/pushes and GPT-6.1 Sol medium delegation; keep at most four concurrent
+agents including parent. Serialize performance measurements.
 
-## State
+## State and constraints
 
-- main, origin ssh://git@github.com/NotRllyRn/touchHLE-web.
-- Latest diagnostic checkpoint b2d36270 pushed; previous baseline a3220587. Offline converter/player and immutable portable ABI3
-  work, but browser still decodes ARM and falls back to JIT for uncaptured blocks.
-- User's M3 Max16-core/64 GB MacBook reportedly loads levels in~30s and plays
-  near full speed; browser/OS and precise FPS not verified. Development host is
-  i9-13900H/8 logical CPUs/Chromium141/CPU SwiftShader. Keep results separate.
-- Three clean offline/JIT medians143/148s are inconclusive at10s screenshot cadence.
-  Both lessons work. <10s and near-real-time/device acceptance remain unmet.
-- Public server stopped. Local diagnostic server127.0.0.1:8765 serves web/dist.
-  Do not expose target/: it contains private game data/traces/packages.
-- Owned IPA /root/local-ipas/TinkerBox HD 1.4.1.ipa; baseline package
-  target/aot-tinker-verified; raw capture target/tinker-aot-capture.json.
-  That package uses the previous core fingerprint; after metadata runtime rebuild,
-  old captures intentionally fail the converter's fingerprint check.
+- Repository main; origin ssh://git@github.com/NotRllyRn/touchHLE-web.
+- Previous pushed checkpoint e42992da; this increment records archive validation.
+  Production runtime/TCI compiler unchanged. Existing converter/player still
+  requires runtime ARM decoding and fallback for uncovered code.
+- Target: TinkerBox game-only static package, faster scene loading and sustained
+  near-real-time gameplay. Both lessons and clean repeated timings are required;
+  <10-second loading and device acceptance remain unmet.
+- User M3 Max 16-core/64 GB report: roughly 30-second loads/full-speed play.
+  Browser, OS and measured FPS unverified. Keep separate from development
+  Chromium141/SwiftShader measurements.
+- No public emulator server. Only localhost 127.0.0.1:8765 serves web/dist,
+  PID2277242 at this checkpoint. Diagnostic browsers stopped. Do not kill the
+  unrelated T3 service or expose target/.
+- IPA: /root/local-ipas/TinkerBox HD 1.4.1.ipa. Never commit it, extracted assets,
+  saves, raw game traces or generated packages. Preserve Rust/native/licenses.
 
-## Current work
+## Authoritative archive implementation
 
-PRD/SAD/SFDS have B0–B4 optimizing-precompiler milestones. New diagnostic profiler
-adds unique generated function names, optional TCI opcode/helper-site counters,
-weighted CPU self/inclusive samples and copied guest-PC/IT/search metadata.
-It is opt-in via local routes, absent from ordinary runtime output. Counts are
-not ARM retirement/timings; call sites include inlined helpers, block visits
-include self loops. Retention truncation and differing counter/sample windows
-are explicit. Cached profiling rejects rather than silently losing counts.
+Parent owns ignored `target/tb-archive-scale/`. Its README.md contains exact
+commands, failures, evidence and remaining limits. `source/` is the tested final
+source, `baseline/` is the untouched bounded codec. Patch sequence:
 
-Read web/README.md for PROFILE_MODE and inspector attach commands. Source hashes
-identify routed diagnostics; local runtime/IPA hashes are only references for
-remote/already-loaded workers. T3 preview failed explicitly due Chrome's root
-sandbox; repository Playwright scripts use /tmp/touchhle-browser-tools/node_modules/
-playwright/index.mjs. No user browser/physical-device results were invented.
+1. target/opaque-ptr-validation/0001-opaque-pointer-materialization.patch
+2. target/tb-restore-prototype/0002-exact-runtime-tb-capture-restore.patch
+3. target/tb-restore-validation/0003-runtime-guard-fixes.patch
+4. target/tb-restore-thumb/0004-thumb-runtime-hooks.patch
+5. target/tb-archive-codec/0005-archive-codec.patch
+6. target/tb-archive-scale/0006-scalable-archive-and-domains.patch
 
-Tests:56 JS tests pass; new source-built instrumented real CPU suite passes14926
-blocks, zero compile/mapping failures/drops, ARM+Thumb maps present. Formatting
-passes. Logs target/opt-profile-{js-final2,metadata-build,metadata-cpu}.log.
-Chromium CPU integration and full runtime rebuild pass. Fresh game timing profile
-retains2642 valid maps with zero errors/drops (opt-profile-guest-startup/).
-HLE mipmap fixture passes twice (opt-profile-metadata-hle.log). Sample15.187s repeats early translation
-hotspot: tb_gen_code_arm6.405s inclusive. No optimization speedup claimed.
+Patch6 already includes task19 operand-domain fixes; do not apply them twice.
+Six-file zero-fuzz replay matches final source. Input/source/execution manifests
+and all failed logs are retained. Do not rerun scale-edit.py: it is a one-shot
+script against the earlier baseline. No active production Unicorn edits/builds.
 
-Profiles: early15.147s sample spends6.874s inclusive in tb_gen_code_arm; late
-15.573s sample spends7.353s self in generated blocks (~47%). See browser.md for
-exact calls/counts and caveats. target/opt-profile-{startup,startup-counts,late-startup}.
-Frontend and generated execution need separate optimizations; asset preloading
-is not supported by these samples.
+Variable canonical LE records replace fixed 16 arrays; bounded full-key hash and
+index, explicit dedup/replacement/quota counters, atomic staged import. Defaults
+16 records/1 MiB; configured maxima 524288 records/256 MiB requested resident,
+256 MiB wire and 512 MiB live+staged requested allocation. No silent eviction.
+Peak includes failed staging; other live state/current allocation roll back.
+Caller buffers, allocator overhead, scratch and retained heap are separate.
 
-Forward-join candidate is NOT adopted: target/tci-jit-forward-joins.js,
-forward-joins-check.mjs and bench-forward-joins.mjs. Correctness passed but
-original/candidate/original benchmarks showed no consistent target benefit.
-Raw target/forward-joins-bench.jsonl. Do not repeat without a new hypothesis.
-A two-TB fusion prototype is delegated under ignored target/ only; production
-compiler remains baseline apart from diagnostic hooks.
+Final `validate.py` completed all 12 stages: formatting, enabled/omitted syntax,
+fresh-process interpreter/JIT persistence, domain checks, storage tests,
+Thumb/IT/fault/hook regressions and full CPU/fiber interpreter/JIT. Covered import
+and flush fixtures require zero frontend calls; mismatch fallback is explicit.
+Each import checks 744 accepted / 1,092 rejected synthetic domain records, plus
+captured mutations. Synthetic operands never execute. Thumb JIT 149 modules;
+full suite 14,926, both zero failures/retention. Full-suite engines are unbound.
 
-## Next
+Storage tests pass 16 / 32,768 / 321,287 cloned keys, exact quotas, differently sized
+replacement, stale seals, noncanonical goto fields, allocation failures, late
+malformed/duplicate rollback, clear/free. At 321,287: 133334220 bytes serialized,
+164516517 requested resident, 329033034 peak live+staged; heap grew 520421376.
+These are clones of a 415-byte ARM record, never executed as guest code. Not game
+coverage, actual capture sizing, import-latency or throughput evidence.
 
-1. Diagnostic increment validated; commit/push checkpoint before further optimization.
-   Profile selected level with inspector if current startup evidence is insufficient.
-2. Review/benchmark two-TB fusion with mutable link and generation guards,
-   budget/PC/helper fault state intact. Reject if no meaningful measured benefit.
-3. Implement safe decoding-free restore separately: current portable keys require
-   live TCI. Exact-runtime/address archive needs translation identity/code bytes,
-   typed engine-pointer provenance, helper/link/exit relocations, full search data,
-   fresh TB allocation/page/hash registration and code-page invalidation state.
-   Never infer engine pointers from numeric ranges or restore stale TB pointers.
-4. Profile selected level transitions and actual helper callers; optimize measured
-   work. Run clean repeated game trials and both lessons before game-speed claims.
-5. Keep goal active until actual acceptance; hardware GPU/mobile remains untested.
+Initial build missed a loop variable; premature link ran before library existed.
+Both failures preserved. Independent review21's peak-counter contract finding
+was resolved by documenting/testing failed staging in peak. No other new
+blocking finding reported. Native copied-TCI smoke previously crashed identically
+baseline/candidate; native execution unresolved. Bounded codec's native compile
+and define-omitted full suite are separate prior results, not repeated here.
 
+## Active delegated work
 
-## Follow-up experiments in progress
+Exact IDs and ownership: `target/optimization-active-handoff.json`.
 
-Counts-only translation observer added;57 JS tests pass. JSON-string snapshot
-transport fixes large Playwright recursive serialization cost. Fresh diagnostic
-records321287 registrations/320670 contexts, no omissions;310159 contexts map to
-static initialization by text symbols. Exact evidence in browser.md; artifacts
-opt-profile-translation-counts-json/. Earlier large-object run completed slowly,
-not an acceptance measurement.
+- Task20 `tinker-archive-enforce-20261027-20`: owns ONLY
+  target/tb-archive-enforce/. Enforce known adapter CPU/config profile, revoke on
+  unsupported mutations, preserve normal context/budget behavior. Max 2 build
+  jobs, no throughput/game tests. Read policy in target/tb-archive-config/.
+- Task22 `tinker-archive-bridge-20261027-22`: owns ONLY
+  target/tb-archive-bridge/. Prepare bounded binary JS worker import/export,
+  exact identity checking and focused mocks; document required C bridge ABI.
+  No builds, real runtime claims or production edits.
+- Tasks16/17/18/19/21 completed. Do not respawn their work or overwrite child
+  trees while active. Parent integrates and tests the final combined branch.
 
-Two-TB sparse-transfer prototype now passes24 tests. Offline modeled-helper
-A/B/A medians129.579/77.224/144.404ms, no native/game claim. Native dispatch
-lifecycle probe delegated (tinker-region-native-adapter-20261027-4).
-Opaque pointer materialization patch under target/opaque-ptr-prototype-20261027
-has14 static checks; separate-source build validation delegated
-(tinker-pointer-op-build-20261027-5). Neither experiment touches production.
-Do not claim static frontend removal or broaden supported helpers before proof.
+Configuration is still a caller promise in the current scaled source. Actual
+production adapter is src/web/cpu.c. Its worker has no C archive bridge yet.
+Do not ship by trusting a caller string or numeric contract. Both ARM/Thumb must
+be checked for supported A32/little-endian profile, not only Thumb. Runtime/IPA
+hashes supplement enforced configuration and live guest-byte/mapping checks.
 
-## Latest checkpoint (supersedes pending experiments above)
+## Performance evidence and rejected work
 
-Production runtime/TCI compiler remains61301008. Current tracked increment fixes
-CDP reconnect profiling (same worker session for snapshots/samples, unique page/
-worker/context/origin selection);59 JS tests and actual reconnect sampling pass.
-Docs now include measured Training01 loading attribution and prototype results.
-No delegated tasks remain active at this checkpoint. All diagnostic games and
-fixture8766 server stopped; localhost8765 still serves web/dist. No public server.
+- Baseline offline/JIT medians 143/148 s are inconclusive at 10 s screenshots; both
+  training lessons work. Existing offline packaging is not a whole-app compiler.
+- Early startup profile: tb_gen_code_arm 6.405 s inclusive in 15.187 s. Selected-level
+  sample: generated self 5.774 s, CPU dispatch self 3.320 s, frontend inclusive 0.633 s,
+  compiler inclusive 1.709 s. Guest scaling 1.596 s, inflate 0.989 s, PNG filtering 0.487 s,
+  MDCT 0.483 s. Diagnostic attribution, not clean acceptance timing. browser.md
+  records exact sample identities and all caveats.
+- Two-block native fusion: roughly 4–5% warmed synthetic gain, game eligibility
+  unproven. Forward joins and aligned-boundary tweaks showed no stable benefit.
+- Lossless PNG A/B/A level observations 127/123/126 s, menu 119/111/117 s. Reject:
+  unproven small gain, IPA+16.87%, expanded PNG+221.4 MiB. All raw artifacts remain
+  target/asset-load-* and target/lossless-png-probe/. No new two-lesson acceptance.
+- Advertising NPOT alone does not change this game's capability initializer;
+  need actual resizing caller/dimension attribution before an image change.
 
-Most important new evidence: selected-level15.244s sample in
-`target/opt-profile-training01-retry/`. Generated self5.774s, two CPU dispatch
-self3.320s, frontend inclusive0.633s, compiler inclusive1.709s. Top guest symbol
-attributions: image scaling1.596s, inflate_fast0.989s, PNG filtering0.487s, MDCT
-butterflies0.483s. Asset processing inside guest code IS material, despite low
-host miniz time. Phase is actual loading, verified frozen stage-select screenshot;
-not a clean acceptance trial (diagnostics/concurrent builds). Initial CDP attempt
-failed due absent Playwright worker wrappers; fixed using same-session CDP eval.
+## Next actions
 
-`target/opaque-ptr-validation/`: original pointer patch passes full Wasm suite
-on/off/define-omitted,35251 checked immediates; synthetic rebasing/spills/helper
-pairs/unknown rejection pass. Native copied Unicorn smoke crashes identically
-with/without patch; separate native Dynarmic backend wasn't changed/tested here.
-
-`target/tb-restore-prototype/`: complete in-memory archive patch from agent,
-synthetic ASan/UBSan and on/off syntax checks, no actual runtime checks there.
-Parent built/tested it in `target/tb-restore-validation/`, where authoritative
-latest source lives. Apply original opaque patch, restore patch, then parent
-`0003-runtime-guard-fixes.patch`. See README.md/final-hashes.json there.
-Actual interpreter/JIT passes cross-engine2 covered TB restores (zero-span exit
-still decodes), flush, host/guest writes, corruption, contract mismatch, fault PC.
-JIT50 modules, zero failures, clean reset. Parent fixes QEMU RAM offset vs guest
-address guard, cluster sentinel, setcond layout, effective max_insns identity.
-Both independent review findings match actual first-run failures. Unknown ops
-still reject. NOT serialized; only16 records, ARM-only/no hooks, no game support.
-97% of startup contexts are Thumb, so broaden only with real IT/fault regressions.
-Adapt synthetic fixtures for changed host-backing/key signature before relying
-on them for parent-source testing. Execution overflow/retry remains untested.
-
-`target/two-tb-fusion/`: native linked fixture passes3 installed/retired regions,
-10179entries/9154edges, stops in both A/B and cleanup;32 focused tests pass.
-General suite threshold32 still fails coverage (unsupported candidate), recorded.
-`target/two-tb-benchmark/`: actual same-artifact A/B/A done with all other heavy
-work stopped. Warm357.701/340.421/354.693ms (~4–5% gain); cold407.556/423.529/
-406.101ms. First run fixed unexported HEAPU32 use; source manifest updated, native
-artifact unchanged. No production adoption or game claim.
-
-Next work:
-1. Extend isolated restore to Thumb and proven runtime-only adapter hooks with
-   targeted IT/fault/budget tests, then scale archive representation and add
-   exact-runtime import/export. Avoid adopting16-slot fixed arrays for the game.
-2. Use level profile to test representative image/decompression CPU blocks;
-   two-block integer fusion alone has only modest native benefit. Preserve all
-   invalidation and helper identity guards if extending eligibility.
-3. Reprofile/measure chosen optimization in comparable game phases, recapture
-   updated runtime, then >=3 clean trials/both lessons. No <10s/real-time claim.
-4. Keep goal active and full PRD acceptance intact; committed diagnostic/prototype
-   milestones are progress, not completion of offline whole-app compilation.
-
-After checkpoint b2d36270 (pushed), Thumb/hook restoration and aligned-boundary
-probes completed. target/tb-restore-thumb/README.md records149 JIT modules with
-zero failures, interpreter parity and successful defines-omitted execution.
-Host writes require explicit adapter invalidation. No full CPU/game/native or
-remapping/protection acceptance yet. target/aligned-boundary-probe native A/B/A
-shows no consistent speed gain; do not adopt the compiler change.
-`...tinker-archive-codec-20261027-14` prepared target/tb-archive-codec with
-explicit LE export/import and fresh-process tests from the final Thumb snapshot.
-`...tinker-archive-codec-validation-20261027-16` now owns that directory and is
-authorized to build/test/fix it with2 jobs; parent game timings have finished.
-target/lossless-png-probe contains verified filter0/stored PNG candidate IPA;
-514 images and336 other files preserved, IPA+16.87%, expanded PNGs+221.4MiB.
-Parent target/run-asset-load.mjs and target/asset-load-driver.py compare visual
-checkpoints at1s cadence with identical production runtime/JIT. Raw A/B/A first
-scene observations127/123/126s and main-menu119/111/117s are in
-target/asset-load-pilot-summary.json. Reject PNG adoption for the small unproven
-gain and221.4MiB possible cache growth. Only the second reference has endpoint
-process-tree PSS (1.314GB, not peak/browser-only/guest-memory). All three exited0,
-zero periodic JIT failures; first lesson screen visually checked, no new two-
-lesson acceptance claim. Both runtime/game browsers are now stopped.
-target/npot-investigation/notes.md shows this game's capability initializer
-checks neither NPOT token; merely advertising WebGL2's capability won't remove
-its POT rounding. Do not implement that string-only hypothesis. Scaling caller/
-dimension attribution is needed before another image-path optimization.
-Full task IDs are in ignored target/optimization-active-handoff.json.
-Archive-design review `...tinker-restore-archive-design-20261027-11` completed:
-explicit LE variable records/index, enforce full runtime/config identity,
-validate atomically before publication, fresh-module roundtrip before scaling.
-Do not serialize native structs/ownership or raise fixed-array/cache limits alone.
-Goal remains active; these tasks are not complete game acceptance.
+1. Review/integrate enforced runtime profile and binary bridge; revalidate the
+   combined source before enabling capture in the actual game runtime.
+2. Capture both native TB records and portable Wasm templates with exact final
+   artifact/IPA identities. Keep canonical pointer recipes distinct from live
+   immediates; restored live TCI can feed existing portable matching.
+3. Measure actual archive coverage, omissions, fallback frontend calls, bytes,
+   import/preparation and peak browser memory. Real record sizes can hit byte
+   quota before 321,287 records. Keep Wasm compilation costs explicit.
+4. Run clean repeated TinkerBox comparison and both lessons, then target remaining
+   initialization/dispatch/HLE work. Update docs and commit/push verified work.
+5. Keep goal active until user acceptance, not just a prototype milestone.

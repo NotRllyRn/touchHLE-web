@@ -66,3 +66,11 @@ All proprietary output stays ignored under target/ or outside the repository.
 Archive checksums detect accidental corruption, not the provenance of executable
 TCI. Initially accept locally captured compiler output with exact identities;
 retain live guest-byte and mapping checks regardless of the IPA fingerprint.
+
+Current isolated evidence: fresh-process persistence and operand-domain rejection
+pass with JIT off/on. Variable storage passes 16, 32,768 and 321,287 synthetic
+records, including exact quota boundaries, replacement, allocation failure and
+late-record rollback. These clones validate storage cardinality only. Runtime
+configuration enforcement, game-worker/CLI integration, actual capture coverage,
+import latency and clean game acceptance remain open. Keep frontend-call counters
+separate from generated-Wasm cache hits throughout integration.

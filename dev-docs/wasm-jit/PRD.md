@@ -45,6 +45,11 @@ apparently 30–60 FPS. OS/browser and controlled frame-time results are unverif
 - R8: Check native reference and relevant CPU/graphics/audio regressions for
   affected changes. Record exact commands, failures and decisions in browser.md;
   keep PROGRESS and HANDOFF current, commit and push verified increments.
+- R9: Persistent translation archives must survive a fresh process/module,
+  enforce the supported CPU/adapter configuration, and validate live guest
+  bytes before restoration. Bound retained and staging memory, reject malformed
+  imports atomically, and report quota omissions and fallback decoding. Synthetic
+  archive cardinality does not establish TinkerBox coverage or loading speed.
 
 ## Scope boundaries
 

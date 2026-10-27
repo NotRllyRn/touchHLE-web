@@ -66,6 +66,28 @@ registration sample contains 310328 Thumb versus 10342 ARM contexts. Supporting
 Thumb must preserve IT/fault state and translator side effects; reject unsupported
 states explicitly rather than silently accepting incomplete metadata.
 
+The isolated persistence prototype now restores admitted ARM/Thumb/IT records
+in fresh Wasm processes with interpreter and JIT execution. Its scalable store
+uses variable-length canonical little-endian records, a fieldwise full-key hash
+and equality check, and a bounded index with at most 50% occupancy. Imported
+indices are rebuilt; ownership pointers are never read from the archive.
+Same-key capture deduplicates identical records or replaces changed bytes;
+quota exhaustion omits new captures explicitly instead of silently evicting.
+
+Import stages an independent store and attaches it only after all records pass
+framing, operand-domain, relocation, search-table and duplicate-key validation.
+Allocation failure frees staging and preserves the live store. Peak allocation
+includes failed staging attempts; retained requested bytes exclude allocator
+overhead, Wasm heap capacity, caller input/output and static scratch. Those
+separate costs must be included in browser integration measurements.
+
+The prototype's caller-provided configuration descriptor remains insufficient
+for shipping. The production adapter must seal an enforced Cortex-A15/A32
+little-endian profile and revoke archive eligibility on unsupported changes.
+Artifact and IPA fingerprints supplement that policy and live byte checks;
+they do not establish unchanged guest mappings or CPU configuration by themselves.
+No production archive bridge or whole-game coverage is claimed yet.
+
 ## Initialization and HLE
 
 Attribute host calls by both self and inclusive time: guest comparator callbacks
@@ -83,7 +105,7 @@ filtering, layout and game behavior equivalence. Do not infer that low host
 inflate time means all asset processing is cheap.
 
 The filter0/stored-IDAT pilot is not selected: serial original/candidate/original
-scene observations127/123/126s do not justify221.4MiB more expanded PNG data.
+scene observations 127/123/126 s do not justify221.4MiB more expanded PNG data.
 Keep original assets in the default package. Likewise, advertising NPOT alone
 cannot change this executable's renderer because it checks neither NPOT token.
 Measure scaling callers and dimensions before changing its image path; backend

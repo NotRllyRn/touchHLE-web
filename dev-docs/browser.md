@@ -3788,3 +3788,88 @@ obtain entry/caller/source/destination-dimension attribution before selecting a
 replacement. Investigation and provenance are in target/npot-investigation/
 notes.md; no guest code/asset bytes were copied into tracked files, and no runtime
 or timing test was performed for this hypothesis.
+
+### 2026-10-27 — Persistent archive execution and scalable storage
+
+The bounded codec in target/tb-archive-codec now passes fresh-process/module
+export/import with interpreter and JIT, including ARM, mixed Thumb, ITE and
+small budgets. Admitted imports and post-flush execution require zero frontend
+calls. Its340 malformed imports reject with rollback; previous Thumb/hook/fault
+and full CPU/fiber checks pass. Define-omitted execution and native compile/link
+pass there; native execution remains unvalidated. Exact commands/results/hashes
+are in COMMANDS.md, dev-docs/browser.md and execution-hashes.json in that directory.
+
+Review17 found missing condition/memory operand-domain validation. Task19's
+target/tb-archive-domains adds checks matching the pinned interpreter. Each
+fresh import process checks 744 accepted / 1,092 rejected synthetic records, plus
+real captured-condition mutations. Synthetic memory records test parsing only
+and never execute. Original records are reimported before guest execution.
+
+Parent merged those checks into target/tb-archive-scale/source. Variable LE
+payloads and a full-key hash/equality index replace fixed 16 maximum-size entries.
+Index occupancy is at most 50%; no ownership/index pointers are serialized.
+Capture deduplicates or replaces the same key. Quota exhaustion counts omissions
+without evicting. Import validates a separate store before atomic attachment.
+Defaults remain 16 records/1MiB; explicit quotas permit 524,288 records/256MiB
+requested resident allocation. Wire size is bounded at 256 MiB and live+staged
+requested allocation at 512 MiB. Current caller configuration promises remain
+insufficient for shipping; enforced adapter policy is still being implemented.
+
+Development fixed a missing capture loop variable, stale-seal deduplication and
+a scratch alias that let canonicalization hide nonzero imported goto fields.
+Independent review21 identified a counter-contract mismatch: failed staging
+updates peak allocation. The documented/tested contract now explicitly includes
+failed staging in peak; live contents/store counters/current allocation roll
+back. All counters 5–14 and allocation exclusions are documented in the header.
+Review snapshots/hashes remain in target/tb-archive-scale-review.
+
+Final executed commands:
+
+```sh
+cmake --build target/tb-archive-scale/build --target unicorn_archive -j2 > target/tb-archive-scale/build-final2.log 2>&1
+python3 target/tb-archive-scale/validate.py > target/tb-archive-scale/validation-driver.log 2>&1
+```
+
+All12 sequential stages pass; validation-results.json records exact commands,
+environment and exit codes. Formatting and enabled/define-omitted syntax pass.
+Fresh-process interpreter/JIT proofs and domain tests pass on the scaled source,
+with zero frontend calls for admitted restores and explicit mismatch fallback.
+Thumb/IT/fault/hook/write regressions pass both modes (JIT 149 modules,0 failures,
+zero retention). Full CPU/fiber tests pass both modes (JIT 14,926 modules,0 failures,
+zero retention). Full-suite engines are unbound: this is general CPU regression
+evidence, not whole-game archive coverage.
+
+Storage tests clone a real 415-byte ARM record by changing its nonzero contract;
+clones never execute. Tests cover all present/absent keys, exact record/byte
+quotas, differently sized replacement, stale-seal repair, noncanonical goto
+rejection, allocation failure in index/record/replacement paths, late duplicate
+and framing rollback, and clear/free accounting.
+
+| Synthetic records | Serialized bytes | Requested resident bytes | Peak live+staged requested bytes |
+| ---: | ---: | ---: | ---: |
+| 16 | 6755 | 8112 | 16224 |
+| 32768 | 13598835 | 16613376 | 33226752 |
+| 321287 | 133334220 | 164516517 | 329033034 |
+
+These are synthetic storage results, not actual game capture sizes. Allocation
+metrics exclude caller buffers, allocator overhead, static scratch and retained
+heap capacity. Largest-run linear memory grew to520421376 bytes. Larger actual
+records can hit the byte quota sooner. No import-latency/throughput benchmark
+was taken; no loading-speed claim follows.
+
+Preserved failures: build.log contains 8 errors for one missing variable; link.log
+attempted linkage before the library existed. Corrected final checks pass;
+upstream warnings and expected negative-fixture faults remain in logs. The
+six-file 0006-scalable-archive-and-domains.patch reproduces tested source with
+zero fuzz over the codec baseline. README.md, source-input-hashes.json,
+source-final-hashes.json and execution-hashes.json record scope and identity.
+No production runtime/source changed, and no native execution or define-omitted
+full rebuild was repeated for this storage increment. Earlier copied-TCI native
+smoke crashed on both baseline and candidate; this remains unresolved.
+
+Next: integrate enforced adapter configuration (task20) and binary worker bridge
+(task22), then capture real TinkerBox and measure omissions, restore/fallback
+coverage, import/preparation, total memory and repeated clean scene loads.
+Persistent TCI restoration is separate from portable Wasm caching and cannot
+establish whole-IPA coverage. Near-real-time/<10s acceptance and the goal remain
+open. No public emulator server was restarted.

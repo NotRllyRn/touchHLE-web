@@ -4,6 +4,19 @@ Updated: 2026-10-27. Engineering work resumed: offline precompilation pivot.
 
 ## Current checkpoint
 
+2026-10-27 archive checkpoint (supersedes historical entries below): persistent
+ARM/Thumb/IT restoration passes fresh-process interpreter/JIT tests with zero
+frontend calls for admitted records. Scalable variable storage passes 321,287
+synthetic keys, quotas/replacement/corruption/allocation-failure rollback and
+clear/free checks. Exact results and limitations: browser.md's persistent
+archive section and target/tb-archive-scale/README.md. Full CPU/fiber off/on pass;
+JIT 14,926 modules, zero failures/retention. Production runtime is unchanged.
+Task20 implements enforced adapter profile; task22 prepares binary worker bridge.
+Real game capture/coverage/performance and user acceptance remain pending.
+The goal is active and unmet; synthetic storage is not whole-app precompilation.
+
+## Historical checkpoints
+
 User resumed development and requested offline IPA-to-web conversion. Public
 preview stopped. Baseline query cache committed as a517977e; user reports~30 s
 loads and apparently full-speed laptop gameplay (qualitative, not benchmarked).
