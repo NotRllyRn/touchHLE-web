@@ -3377,3 +3377,119 @@ failures, then deliberately stops. target/check-tinker-package.mjs and
 aot-tinker-verified-{build,smoke}.log. This smoke is not a repeat of full lesson
 acceptance; prior full-lesson and three-trial results use identical runtime and
 compiled-module bytes. Public preview remains off; no benchmark left running.
+
+## 2026-10-27: optimizing-precompiler plan and detailed profiling
+
+The renewed optimizing-precompiler goal is active (verified with get_goal).
+PRD/SAD/SFDS now track B0–B4: diagnostic attribution, phase-specific evidence,
+measured region/frontend/HLE improvements, then clean game/device acceptance.
+Public preview remains stopped; only 127.0.0.1:8765 serves local diagnostics.
+User reports an M3 Max 16-core/64 GB MacBook with ~30 s loads and apparently
+full-speed gameplay; browser, OS version and precise FPS are unverified.
+
+Added opt-in generated-function names, dynamic TCI opcode counts and immediate
+helper call-site visits. Timing mode has names only; counts mode has intrusive
+mutable-global increments. TCI block visits include self-linked iterations, not
+just Wasm invocations. Inlined helper sites count even when no helper is called.
+Ordinary generated code is byte-identical when profiling is absent. Cached
+module profiling is rejected explicitly rather than silently missing execution.
+Metadata exhaustion reports partial coverage; failed codegen consumes quota but
+records no executions. This does not measure ARM retirement or instruction time.
+
+CPU report uses actual sample deltas, separates self/inclusive time, distinguishes
+same-named functions in different modules and deduplicates recursive inclusive
+frames. Review found mode/worker/identity/window ambiguities: now requested mode
+must match instrumentation, multiple emulator workers reject, coverage propagates,
+counter-window timestamps are separate from sample duration, and local reference
+hashes are not claimed as proof of the loaded runtime. Routed diagnostic hashes
+are captured at installation. Local CDP references remain explicitly unverified.
+
+Diagnostic runs on baseline runtime (before guest metadata hook), Chromium141 /
+CPU SwiftShader, same explicit GPU flags as previous offline comparisons:
+`PROFILE_MODE=timing PROFILE_PHASE=startup PROFILE_DELAY_MS=20000 PROFILE_MS=15000
+PROFILE_DIR=target/opt-profile-startup TEST_IPA='/root/local-ipas/TinkerBox HD 1.4.1.ipa'
+PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+BROWSER_ARGS='["--enable-gpu","--ignore-gpu-blocklist","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]'
+node web/profile-runtime.mjs`. Repeat with counts mode/output suffix-counts;
+late-startup uses delay80000 and output target/opt-profile-late-startup.
+
+- Early sample15147 ms: tb_gen_code_arm3022 ms self/6874 ms inclusive,
+  compile1119 self, liveness_pass_1 977, dispatcher932, cpu_exec897. Generated
+  blocks950 ms self total. Translation is a major early-startup cost.
+- Count pass:1712 records, no truncation; window movi72,746,444, st_i3254,675,103,
+  ld_i3240,130,952, call11,961,447, add11,447,633, brcond10,218,161,
+  mov7,937,842, guest loads5,948,933. These are TCI visits from an intrusive
+  separate run, not the same game progress as the timing window. That older run
+  predates helper-site counters and summary block-count window correction;
+  counts.json opcode deltas are valid, summary block counts were cumulative.
+- Late sample15573 ms: generated blocks7353 ms self (~47%); cpu_exec1727,
+  hottest block1704, dispatcher1531, GetIntegerv570 self/1088 inclusive,
+  getParameter532. Hottest block has196movi,129st,155ld,48calls and74adds
+  statically. Composition does not apportion its measured time to opcodes.
+
+Profiles are diagnostics, not acceptance runs. Frontend cost differs by phase;
+prior level-load evidence does not imply runtime ARM decoding is always cheap.
+No asset-preload change is justified by these samples.
+
+Forward-join definition intersection prototype was reviewed/tested under target/.
+Agent reports10 focused +22 compiler tests passed. Parent ran
+`node target/bench-forward-joins.mjs > target/forward-joins-bench.jsonl`:
+Node22.22.3,500000 iterations,7 trials, original/candidate/original per workload.
+Many-register medians104.010/105.463/100.162 ms, bytes3094/3017/3094;
+conditional-float fast194.795/209.159/184.074 ms, bytes6109/6095/6109;
+self-link64 120.183/118.424/118.347 ms. Taken-chain medians73.842/63.263/69.808
+have substantial spread/tiering. No consistent targeted benefit; do not adopt.
+The candidate/tests/benchmark remain ignored; no production optimization claim.
+
+Pinned ARM32 registration hook now optionally copies encode_search metadata:
+guest PC/span, translated slot count, full TB flags and copied encoded table.
+Thumb is flag bit8, not PC bit0. Parser preserves IT state and partial syndrome,
+allows equal TCI end offsets and zero-size guest TBs, rejects malformed tables.
+Each retained record carries registration generation, distinguishing address reuse.
+No guest-memory reads or execution callbacks are added. Metadata is diagnostic,
+not enough to restore TBs or remove runtime decoding. Restoration still needs
+exact translation identity, code verification, typed engine-pointer provenance,
+helper/link/exit relocations, search table and fresh TB invalidation/publication.
+
+Validation so far: initial hand-built goto fixture used wrong alignment and
+failed; corrected to38bytes with displacement-28 (not suppressed). Initial
+profiling44 JS tests and real CPU/fiber suite pass,14926 compiled blocks,
+zero failures/drops (target/opt-profile-{js,cpu}-calls.log). Guest parser/integration
+focused17 tests pass. Expanded suite55 passes before final call-site-label test.
+Guest hook rebuild and live-metadata CPU/browser checks are tracked below.
+T3 preview was explicitly unavailable because Chrome cannot start its sandbox
+as root; use the documented repository Playwright scripts. No public listener.
+
+Final validation of this increment:56/56 JS tests (opt-profile-js-final2.log),
+`cargo fmt --all -- --check`, `git diff --check`, and eight-patch reverse/reapply
+byte comparison pass. Existing budget patch EOF-whitespace warning remains;
+no new whitespace errors. Updated Unicorn/shared CPU build succeeds with existing
+compiler warnings. `node web/test-profile-cpu.mjs` passes all real CPU/fiber/cache
+assertions with14926 compiled blocks, zero compiler failures/drops, every record
+has a valid guest map, ARM and Thumb both present (opt-profile-metadata-cpu.log).
+`TEST_SHARED_CPU=1 TEST_JIT=1 PLAYWRIGHT_MODULE=... node web/test-browser.mjs`
+passes Chromium CPU/input checks and reports no page errors
+(opt-profile-metadata-browser.log). Full runtime rebuild succeeds
+(opt-profile-metadata-runtime.log); C/Rust native execution path is unchanged.
+
+Fresh mapped timing run uses the above startup command with PROFILE_PHASE=
+startup-with-guest-map and PROFILE_DIR=target/opt-profile-guest-startup.
+15186.531 ms sampled;2642 retained blocks,2642 valid maps, zero mapping errors,
+no quota drops/truncation/page errors. tb_gen_code_arm2723.12 ms self/6404.97 ms
+inclusive; compile1215.60 self; liveness1056.31; dispatcher994.58 self;
+cpu_exec918.49 self. Installed-source hashes are present. This validates actual
+browser/game attribution and repeats the early translation hotspot; it is not
+an acceptance timing or evidence of an optimization speedup.
+
+Ignored two-block fusion prototype target/two-tb-fusion passes13 synthetic groups
+including400 budget/input differential cases (agent validation). Not installed in
+production. A->B shares locals and checks mutable links/generation gates; current
+prototype has conservative transfers and lacks native table-slot ownership and
+individual-TB invalidation notifications. Next experiment: sparse transfers and
+real translated-pair validation before any performance claim. Exact contract is
+in that directory; safe relocation/frontend capture remains separate unfinished work.
+
+Updated full-runtime `TEST_MIPMAP=1 TEST_URL='http://127.0.0.1:8765/?cpu=jit&jitThreshold=1'
+PLAYWRIGHT_MODULE=/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs
+node web/test-runtime.mjs` passes two fresh runs, clean guest exit, zero compiler
+failures/page errors and static GET-only traffic (opt-profile-metadata-hle.log).

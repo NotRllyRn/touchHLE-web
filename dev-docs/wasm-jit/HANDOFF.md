@@ -1,123 +1,74 @@
-# Offline precompilation checkpoint
+# Optimizing offline compiler handoff
 
-Updated: 2026-10-27. User resumed work, pivoting to a local IPA-to-web converter
-and static per-game player. Public0.0.0.0:8765 preview stopped as requested.
-The new engineering objective is in PRD.md; full static translation is unfinished.
+Updated 2026-10-27. The renewed thread goal is active. User authorized continued
+implementation, commits/pushes and GPT-6.1 Sol medium subagents (at most4–5);
+serialize benchmarks. Previous paused-goal limitation has been resolved.
 
-## Goal metadata limitation
+## State
 
-`create_goal` rejected replacement: an unfinished paused goal already exists.
-Available tools cannot cancel/replace/resume it. Do not mark the old unmet goal
-complete to bypass this. User has explicitly authorized continued engineering
-under the new objective; PROGRESS.md tracks that work independently.
+- main, origin ssh://git@github.com/NotRllyRn/touchHLE-web.
+- Latest baseline a3220587. Offline converter/player and immutable portable ABI3
+  work, but browser still decodes ARM and falls back to JIT for uncaptured blocks.
+- User's M3 Max16-core/64 GB MacBook reportedly loads levels in~30s and plays
+  near full speed; browser/OS and precise FPS not verified. Development host is
+  i9-13900H/8 logical CPUs/Chromium141/CPU SwiftShader. Keep results separate.
+- Three clean offline/JIT medians143/148s are inconclusive at10s screenshot cadence.
+  Both lessons work. <10s and near-real-time/device acceptance remain unmet.
+- Public server stopped. Local diagnostic server127.0.0.1:8765 serves web/dist.
+  Do not expose target/: it contains private game data/traces/packages.
+- Owned IPA /root/local-ipas/TinkerBox HD 1.4.1.ipa; baseline package
+  target/aot-tinker-verified; raw capture target/tinker-aot-capture.json.
+  That package uses the previous core fingerprint; after metadata runtime rebuild,
+  old captures intentionally fail the converter's fingerprint check.
 
-## Source and artifacts
+## Current work
 
-- Main branch, origin ssh://git@github.com/NotRllyRn/touchHLE-web.
-- a517977e: query cache baseline;4c7c7c09: revised plans;
-  cc9fc835: offline packages;cedb96c1: immutable portable imports. Pushed.
-- Runtime C/Rust Wasm is unchanged by this pivot. Current JS/compiler source
-  is copied to web/dist by both build scripts. Public server remains off.
-- Local diagnostic servers:127.0.0.1:8765 serves web/dist;127.0.0.1:8766 serves
-  ignored target/. Do not expose target/ publicly; it includes private artifacts.
-- Latest package: target/aot-tinker-verified (same guest/compiler Wasm, verified
-  player). Comparison package: target/aot-tinker-globals. Original owned IPA:
-  /root/local-ipas/TinkerBox HD 1.4.1.ipa. No proprietary content committed.
-- Runtime compiler portable ABI 3; archive/trace outer format 1. Older raw TCI
-  traces with ABI 1/2 can be recompiled against the same core runtime.
+PRD/SAD/SFDS have B0–B4 optimizing-precompiler milestones. New diagnostic profiler
+adds unique generated function names, optional TCI opcode/helper-site counters,
+weighted CPU self/inclusive samples and copied guest-PC/IT/search metadata.
+It is opt-in via local routes, absent from ordinary runtime output. Counts are
+not ARM retirement/timings; call sites include inlined helpers, block visits
+include self loops. Retention truncation and differing counter/sample windows
+are explicit. Cached profiling rejects rather than silently losing counts.
 
-## What works and what does not
+Read web/README.md for PROFILE_MODE and inspector attach commands. Source hashes
+identify routed diagnostics; local runtime/IPA hashes are only references for
+remote/already-loaded workers. T3 preview failed explicitly due Chrome's root
+sandbox; repository Playwright scripts use /tmp/touchhle-browser-tools/node_modules/
+playwright/index.mjs. No user browser/physical-device results were invented.
 
-`web/precompile-ipa.mjs INPUT.ipa OUTPUT_DIR` performs bounded local capture,
-offline Wasm compilation and static game packaging. Optional --capture reuses
-an existing trace; --seconds and --clicks control coverage; --threshold 1 is for
-short original test IPAs. Read exact syntax in web/README.md. Generated player
-has Play/Stop and no IPA chooser. ?cpu=jit skips the precompiled cache for A/B.
+Tests:56 JS tests pass; new source-built instrumented real CPU suite passes14926
+blocks, zero compile/mapping failures/drops, ARM+Thumb maps present. Formatting
+passes. Logs target/opt-profile-{js-final2,metadata-build,metadata-cpu}.log.
+Chromium CPU integration and full runtime rebuild pass. Fresh game timing profile
+retains2642 valid maps with zero errors/drops (opt-profile-guest-startup/).
+HLE mipmap fixture passes twice (opt-profile-metadata-hle.log). Sample15.187s repeats early translation
+hotspot: tb_gen_code_arm6.405s inclusive. No optimization speedup claimed.
 
-This is **profile-assisted TCI-to-Wasm precompilation**, not full static ARM
-recompilation. ARM-to-TCI decoding still runs to identify current blocks; unseen
-blocks retain JIT. Whole-app static discovery and removing runtime ARM decoding
-remain unfinished. Do not describe this as a completely precompiled IPA.
+Profiles: early15.147s sample spends6.874s inclusive in tb_gen_code_arm; late
+15.573s sample spends7.353s self in generated blocks (~47%). See browser.md for
+exact calls/counts and caveats. target/opt-profile-{startup,startup-counts,late-startup}.
+Frontend and generated execution need separate optimizations; asset preloading
+is not supported by these samples.
 
-Portable blocks bind current move immediates as immutable imports, including
-engine-private pointers; base-relative helper PCs/links and live exit identities
-remain correct. Re-registration rebinds values. Layout/code identity and pinned
-core fingerprints guard reuse. Caches retain existing bounds and invalidation.
+Forward-join candidate is NOT adopted: target/tci-jit-forward-joins.js,
+forward-joins-check.mjs and bench-forward-joins.mjs. Correctness passed but
+original/candidate/original benchmarks showed no consistent target benefit.
+Raw target/forward-joins-bench.jsonl. Do not repeat without a new hypothesis.
+A two-TB fusion prototype is delegated under ignored target/ only; production
+compiler remains baseline apart from diagnostic hooks.
 
-## Validation and measurements
+## Next
 
-- 37 JS tests pass; actual ARM/Thumb/VFP/FPSCR/context/SVC/fault/budget/invalidation/
- eviction/fiber suite passes capture and offline modes:14,926 offline instances,
- 0 misses/failures,61 templates. Final logs target/aot-immutable-*-final.log.
-- Initial immutable-import test found10 large-block compile failures. Fixed
- unsigned LEB128 import count and added150-import test. Failure retained in
- target/aot-immutable-cpu-tests.log; no hiding fallback failures.
-- CLI end-to-end capture/compile/package and two fresh browser runs each pass
- for mipmap and presentation fixtures, all130/103 block instances offline.
-- TinkerBox clean v2/v3/immutable variants and fresh JIT reference pass both
- lessons, actual pinch and touch placement; placement/SUCCESS images inspected.
-- Immutable package:15,646 templates,38,491,889 Wasm bytes,66,016,377 JSON bytes.
-- Clean immutable preparation1,942.8 ms; previous decoder version11,998 ms.
- Native Base64/fallback loop isolated decode+checksum medians1,045.9/1,445.4 ms
- versus10,248 ms original. Raw log target/aot-decode-isolated.log.
-- Immutable-import loop median6.773 versus7.510 ms live TCI reads (~10% targeted),
- normal JIT5.913 ms. Not a whole-game improvement estimate.
-- Single clean immutable game: menu checkpoint133 s, Training229 -> Play372 =143 s;
- first 60 s51 logged FPS samples, median4.24, range0.60–8.95.
-- Same-package fresh JIT reference: menu151 s, Training241 -> Play389 =148 s;
-50 samples, median3.825, range0.65–8.93. Earlier optimized live-immediate package:
-142 s level,4.63 median. Small differences require repeated trials.
-- Profiled level loading:47% of sampled worker CPU in generated guest Wasm;
- CPU dispatch/HLE also significant. Asset decompression not a leading cost.
- Existing IPA implementation already caches decompressed entries.
-- Host i9-13900H,x86_64,8 online logical CPUs; Chromium 141/CPU SwiftShader.
- No hardware GPU, Firefox/WebKit or physical mobile validation. User's laptop
- report (~30 s loads, apparent full-speed gameplay) is qualitative, separate data.
-
-## Completed repeated comparison
-
-All alternating trials finished. Offline level intervals 143/149/138 s
-(median 143, range 138–149), JIT 148/142/149 s (median 148, range 142–149).
-Offline first-minute FPS trial medians 4.24/4.495/4.27, JIT 3.825/4.64/4.81.
-No clear whole-game gain: ten-second screenshot cadence, driver delay and trial
-variation exceed the apparent small difference. Final repeated offline counters
-show 20,943/21,216 precompiled instances, 2,939/2,678 misses, zero failures.
-All six accepted logs have no page-error/panic/RuntimeError signatures.
-
-Harness target/repeat-tinker-loads.py, rows target/aot-repeat-results.jsonl,
-summary target/aot-repeat-driver.log. Inspector exit1 follows deliberate UI Stop;
-drivers terminate intentionally. Full lesson correctness was checked separately.
-Previous late-driver immutable attempt remains discarded.
-
-## Latest follow-up
-
-Small-literal specialization prototype is rejected: loop median 6.738 ms versus
-6.765/6.735 ms original; no demonstrated gain. Only ignored target/ copies
-exist. No portable ABI change: still 3.
-
-Player now verifies manifest/archive identity and IPA/runtime hashes before
-Play. Final JS 37 pass; two fresh runs each of mipmap/presentation fixtures and
-corrupt IPA/runtime/compiler/archive rejections pass. CLI rejects wrong IPA/core
-trace and existing output directory. Runtime/CPU code is unchanged.
-
-Verified TinkerBox package build from existing trace: 35.267 s. Browser page
-ready 3.420/3.315/3.283 s; validation 2.208/2.178/2.169 s. These are before
-guest startup. Actual precompiled-block smoke passes with zero compiler failures.
-No new scene-speedup claim. Full report: PERFORMANCE.md.
-
-## Next steps
-
-1. Obtain controlled hardware-GPU/device measurements of loading and frame times;
-   user laptop report remains qualitative. Current host uses CPU SwiftShader.
-2. Attribute remaining CPU time to guest initialization/HLE calls versus ARM
-   translation before expanding the static frontend. The new SAD records the
-   required guest-code/state/relocation/exception metadata contracts.
-3. Full static ARM frontend removal, <10 s scenes and physical-device acceptance
-   remain unfinished. Do not mark the old goal complete to replace its metadata.
-4. Avoid repeating rejected small-literal, dispatch, tail-call, scratch and
-   float-side-exit experiments without new evidence. No benchmark is running.
-
-No subagents authorized. Proprietary code/assets/traces remain under ignored
-local paths. SDK target/emsdk; Playwright module
-/tmp/touchhle-browser-tools/node_modules/playwright/index.mjs. Exact history,
-commands, failures and limits: ../browser.md; plans and progress alongside this file.
+1. Diagnostic increment validated; commit/push checkpoint before further optimization.
+   Profile selected level with inspector if current startup evidence is insufficient.
+2. Review/benchmark two-TB fusion with mutable link and generation guards,
+   budget/PC/helper fault state intact. Reject if no meaningful measured benefit.
+3. Implement safe decoding-free restore separately: current portable keys require
+   live TCI. Exact-runtime/address archive needs translation identity/code bytes,
+   typed engine-pointer provenance, helper/link/exit relocations, full search data,
+   fresh TB allocation/page/hash registration and code-page invalidation state.
+   Never infer engine pointers from numeric ranges or restore stale TB pointers.
+4. Profile selected level transitions and actual helper callers; optimize measured
+   work. Run clean repeated game trials and both lessons before game-speed claims.
+5. Keep goal active until actual acceptance; hardware GPU/mobile remains untested.

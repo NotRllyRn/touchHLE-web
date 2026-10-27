@@ -1,31 +1,41 @@
-# Offline precompilation functional design
+# Optimizing precompiler functional design
 
-Updated: 2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
+Updated: 2026-10-27. Existing correctness contracts: SFDS-jit-history.md.
 
-## Milestones and checks
+## Milestones
 
-- A0: Preserve tested browser baseline; stop public preview; record new objective.
-- A1: Relocatable compiler. Validate across different TCI addresses and memories,
-  relocated branches, mutable links, helper GETPC/fault propagation, exit identities,
-  code mutation, cache reset, ABI mismatch and bounded retention. Immutable
-  parameters must rebind after invalidation; import vectors over 127 entries
-  require proper unsigned LEB128 encoding. Existing JIT
-  output and behavior remain the default unless portable mode is selected.
-- A2: Offline CLI capture/compile/package. Emit actual Wasm, versioned metadata,
-  content fingerprint and a static per-game player. No IPA chooser in output.
-  Reject corrupt/incompatible packages before Play: verify IPA/runtime hashes
-  and archive identity. Exercise changed IPA, runtime, compiler and archive plus
-  CLI trace mismatch and existing-directory rejection. Report coverage honestly.
-- A3: Clean JIT/precompiled TinkerBox comparisons and both-lesson regressions.
-  Preserve raw local artifacts, commands, trial counts and any failed checks.
-- A4: Profile loading; expand static discovery and optimize measured initialization
-  or asset work. Retain only demonstrated improvements. Repeat relevant regressions.
+- B0: Update requirements/architecture, retain a3220587 baseline and measurements,
+  confirm renewed active goal and public preview stopped.
+- B1: Diagnostic profiles with stable generated-block identities, TCI opcode
+  dynamic counts, block entries/self loops, compile costs, and CPU sampled self/
+  inclusive times. Export bounded JSON locally. Regression checks must prove
+  branch-sensitive counts, memory growth, faults, re-registration and recursion
+  aggregation; instrumentation must be absent from ordinary output.
+- B2: Capture TinkerBox startup and selected level-load phase, identify ranked
+  hotspots and caller causes. Add guest ARM PC/mode/instruction metadata and
+  controlled opcode throughput fixtures where attribution is currently missing.
+- B3: Optimize measured code/initialization. Evaluate bounded connected regions,
+  frontend reuse and HLE costs separately. Keep only candidates that pass
+  correctness and show targeted improvement; require clean game trials for a
+  game-speed claim. Record rejected variants and their measurements.
+- B4: Validate offline package with both training lessons, >=3 clean comparison
+  trials, memory/artifact/coverage metrics and near-real-time/<10 s targets.
+  Hardware-GPU and M3 Max results are separate from software-GPU development runs.
 
-## Packaging and lifecycle
+## Diagnostic contracts
 
-Output defaults below ignored target/. Never overwrite an existing package or
-source tree silently. Validate IPA locally; preserve bundled dependency notices.
-The guest still uses the same loader/HLE environment. Fresh worker per run;
-Stop releases game/module memory. Assets stay local to the generated site.
-Developer capture and guest execution are explicit, bounded build stages.
-Performance instrumentation is opt-in and excluded from clean acceptance runs.
+Reports identify mode, phase, runtime/compiler/IPA fingerprints, browser/device,
+wall duration and sampled duration. Counters are opt-in and bounded; saturation,
+omitted blocks, fallback and unavailable fields are explicit. Time categories
+must not double-count inclusive frames as total CPU time. Preserve raw sample
+profiles separately from summaries. Avoid debugger breakpoints that deoptimize
+Wasm. Counts and timing samples from different runs must be labeled as such.
+
+## Correctness and lifecycle gates
+
+CPU: ARM/Thumb/IT, integer/VFP/FPSCR, contexts, SVC, faults, budgets, hooks,
+unmapped/cross-page accesses, code invalidation, cache eviction and fibers.
+Graphics/audio/input: relevant existing fixtures and real TinkerBox lesson input.
+Package: capture identity, current compiler, corrupt payloads, immutable outputs,
+Play/Stop fresh worker lifecycle, no upload form or runtime server dependence.
+All proprietary output stays ignored under target/ or outside the repository.

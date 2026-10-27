@@ -37,6 +37,7 @@
       // Set by the offline tooling before the engine is created. Default JIT
       // keeps its existing session-specialized code and retention limits.
       this.portable = TouchHLETciJit.portable ?? null;
+      this.profile = TouchHLETciJit.profile ?? null; // Diagnostic tooling only.
       this.names = [];
       this.blocks = new Map();
       this.compiled = new Map();
@@ -56,7 +57,7 @@
       this.liveModules = 0;
       this.stats.resets++;
     }
-    register(ptr, size) {
+    register(ptr, size, guestMetadata) {
       const old = this.blocks.get(ptr);
       this.compiled.delete(ptr);
       if (old?.fn) { this.removeFunction(old.fn); this.liveBytes -= old.bytes; this.liveModules--; }
@@ -64,9 +65,11 @@
       // Bound metadata/module retention, including permanently cold blocks.
       if (this.blocks.size >= 65536) { this.reset(); this.stats.metadataResets++; }
       this.stats.registered++;
-      this.blocks.set(ptr, { size, count: 0, fn: 0, failed: false });
+      this.blocks.set(ptr, { size, count: 0, fn: 0, failed: false,
+        generation: this.stats.registered, ...(guestMetadata ? { guestMetadata } : {}) });
     }
     lookup(ptr) {
+      if (this.profile && this.portable?.modules) throw new Error('Profiling cached modules is unsupported; use the JIT reference path');
       const block = this.blocks.get(ptr);
       if (!block || block.failed) return 0;
       if (block.fn) {
@@ -109,7 +112,8 @@
         this.stats.moduleMs += performance.now() - moduleStart;
         const instantiateStart = performance.now();
         const instance = new WebAssembly.Instance(module,
-          { e: { m: this.memory, s: this.step, c: this.dispatch?.call, b: ptr, ...description?.bindings } });
+          { e: { m: this.memory, s: this.step, c: this.dispatch?.call, b: ptr, ...description?.bindings,
+            ...this.profile?.bindings(this, ptr) } });
         this.stats.instantiateMs += performance.now() - instantiateStart;
         if (cached) this.stats.precompiled++;
         this.portable?.capture?.({ ...description, abi: this.abi });
@@ -183,6 +187,8 @@
       }
       const boundaries = new Set(ops.map(op => op.pc));
       if ([...targets].some(target => !boundaries.has(target))) throw new Error('Invalid branch target');
+      const probe = this.profile?.begin(this, start, length, ops);
+      const profileBase = portable ? 1 + ops.filter(op => op.name === 'movi_i32').length : 0;
       const labels = [...targets].sort((a, b) => a - b);
       const out = [], immediateImports = [];
       const emit = (...bytes) => out.push(...bytes);
@@ -207,9 +213,11 @@
         restore(outputs);
       };
       emit(0x03, 0x40); // Same-block backedges keep TCI registers in locals.
+      if (probe) emit(...probe.count('block', profileBase));
       for (const _ of labels) emit(0x02, 0x40);
       for (const { pc, size, name, target } of ops) {
         if (labels[0] === pc) { emit(0x0b); labels.shift(); defined.clear(); }
+        if (probe) emit(...probe.count(name, profileBase, pc));
         let cursor = pc + 2;
         const byte = () => view.getUint8(cursor++);
         const word = () => { const value = view.getUint32(cursor, true); cursor += 4; return value; };
@@ -472,13 +480,15 @@
         ...section(1, [3, 0x60, 5, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f,
           0x60, 14, ...Array(14).fill(0x7f), 1, 0x7e]),
-        ...section(2, [...uleb((this.dispatch?.call ? 3 : 2) + (portable ? 1 + immediateImports.length : 0)), ...str('e'), ...str('m'), 2, 0, 0,
+        ...section(2, [...uleb((this.dispatch?.call ? 3 : 2) + (portable ? 1 + immediateImports.length : 0) + (probe?.globals.length ?? 0)), ...str('e'), ...str('m'), 2, 0, 0,
           ...str('e'), ...str('s'), 0, 0,
           ...(this.dispatch?.call ? [...str('e'), ...str('c'), 0, 2] : []),
-          ...(portable ? [...str('e'), ...str('b'), 3, 0x7f, 0, ...immediateImports.flat()] : [])]),
+          ...(portable ? [...str('e'), ...str('b'), 3, 0x7f, 0, ...immediateImports.flat()] : []),
+          ...(probe?.globals.flatMap(name => [...str('e'), ...str(name), 3, 0x7c, 1]) ?? [])]),
         ...section(3, [1, 1]),
         ...section(7, [1, ...str('run'), 0, this.dispatch?.call ? 2 : 1]),
         ...section(10, [1, ...uleb(body.length), ...body]),
+        ...(probe?.nameSection(this.dispatch?.call ? 2 : 1) ?? []),
       ]);
     }
   }

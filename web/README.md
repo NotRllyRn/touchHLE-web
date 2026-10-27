@@ -304,3 +304,30 @@ To reproduce the isolated full-payload decode/checksum comparison, serve a gener
 game directory and run `TEST_URL=http://127.0.0.1:8766/my-game/
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/bench-precompiled.mjs`.
 Keep game performance trials and this benchmark separate.
+
+Detailed diagnostics use the ordinary JIT uploader and separate timing/count runs:
+
+```sh
+PROFILE_MODE=timing PROFILE_PHASE=startup PROFILE_DELAY_MS=20000 PROFILE_MS=15000 \
+  PROFILE_DIR=target/profile-startup TEST_IPA=/absolute/path/to/owned.ipa \
+  PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node web/profile-runtime.mjs
+```
+
+Use `PROFILE_MODE=counts` for dynamic TCI opcode and immediate-helper call-site
+visits. This adds substantial overhead; never use its elapsed time as acceptance
+data. Timing mode adds unique Wasm function names without counters. Neither mode
+times individual ARM instructions. Block visits include compiled self loops;
+call-site visits include inline fast paths, not just actual helper calls. Metadata
+retention is bounded and reports explicitly mark incomplete coverage. Raw Chrome
+samples, counts, sampled self/inclusive time, logs and a screenshot stay local.
+Counter windows include CDP command delays outside the sampling window; their
+counts cannot be divided into sampled time to infer instruction latency.
+
+`TCI_PROFILE_MODE=timing|counts node web/inspect-ipa.mjs` installs diagnostics
+before game startup. Attach `web/profile-runtime.mjs` later with `PROFILE_CDP`
+and the matching mode to inspect a selected scene. Only one emulator worker may
+be active in that browser. Do not combine `TCI_PROFILE_MODE` and
+`INSPECTION_OPTIONS` (both intercept worker loading). Cached-module profiling is
+explicitly rejected: use the JIT reference until cached instrumentation exists.
+Routed compiler hashes identify installed diagnostic sources; local runtime/IPA
+fingerprints are references, not proof of remote or already-loaded worker bytes.

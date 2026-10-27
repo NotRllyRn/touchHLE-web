@@ -57,6 +57,10 @@ try {
     const setup = `    runtime.FS.writeFile('/touchHLE_options.txt', ${JSON.stringify(process.env.INSPECTION_OPTIONS)});\n`;
     await route.fulfill({ response, body: source.replace(marker, setup + marker) });
   });
+  if (process.env.TCI_PROFILE_MODE) {
+    if (process.env.INSPECTION_OPTIONS) throw Error('Run detailed profiling separately from FPS/options instrumentation');
+    await (await import('./profile-instrumentation.mjs')).installProfileRoutes(page, process.env.TCI_PROFILE_MODE);
+  }
   const url = new URL(process.env.TEST_URL || 'http://127.0.0.1:8765');
   if (process.env.CAPTURE_AOT) { url.searchParams.set('cpu', 'jit'); url.searchParams.set('aot', 'capture'); }
   await page.goto(url.href);

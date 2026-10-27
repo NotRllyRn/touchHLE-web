@@ -1,6 +1,6 @@
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -478,18 +478,54 @@
+@@ -478,18 +478,71 @@
  uintptr_t tci_tb_ptr;
  #endif
  
@@ -20,13 +20,30 @@
 +{
 +    memset(touchhle_dispatch, 0, sizeof(touchhle_dispatch));
 +}
-+EM_JS(void, touchhle_tci_register_js, (uintptr_t ptr, unsigned size), {
-+    if (Module['tciJit']) Module['tciJit'].register(ptr, size);
++EM_JS(void, touchhle_tci_register_js,
++    (uintptr_t ptr, unsigned size, uint32_t guest_pc, unsigned guest_size,
++     unsigned icount, uint32_t flags, uintptr_t search, unsigned search_size), {
++    var jit = Module['tciJit'];
++    if (!jit) return;
++    if (jit.profile) {
++        // Copy translation metadata now: the code buffer can be reused.
++        // This reads only the encoded table, never guest instruction bytes.
++        jit.register(ptr, size, {
++            format: 'arm32-encode-search-v1', guestPc: guest_pc >>> 0,
++            guestSize: guest_size, icount: icount, flags: flags >>> 0,
++            search: HEAPU8.slice(search >>> 0, (search >>> 0) + search_size)
++        });
++    } else {
++        jit.register(ptr, size);
++    }
 +});
-+void touchhle_tci_register(uintptr_t ptr, unsigned size)
++void touchhle_tci_register(uintptr_t ptr, unsigned size, uint32_t guest_pc,
++    unsigned guest_size, unsigned icount, uint32_t flags,
++    uintptr_t search, unsigned search_size)
 +{
 +    touchhle_dispatch[(ptr >> 4) & 8191].key = 0;
-+    touchhle_tci_register_js(ptr, size);
++    touchhle_tci_register_js(ptr, size, guest_pc, guest_size, icount, flags,
++                            search, search_size);
 +}
 +EM_JS(void, touchhle_tci_reset, (), {
 +    if (Module['tciJit']) Module['tciJit'].reset();
@@ -66,7 +83,7 @@
      for (;;) {
          TCGOpcode opc = tb_ptr[0];
  #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-@@ -550,6 +586,7 @@
+@@ -550,6 +603,7 @@
              label = tci_read_label(&tb_ptr);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr = (uint8_t *)label;
@@ -74,7 +91,7 @@
              continue;
          case INDEX_op_setcond_i32:
              t0 = *tb_ptr++;
-@@ -752,7 +789,8 @@
+@@ -752,7 +806,8 @@
              if (tci_compare32(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -84,7 +101,7 @@
              }
              break;
  #if TCG_TARGET_REG_BITS == 32
-@@ -778,7 +816,8 @@
+@@ -778,7 +833,8 @@
              if (tci_compare64(tmp64, v64, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -94,7 +111,7 @@
              }
              break;
          case INDEX_op_mulu2_i32:
-@@ -1026,7 +1065,8 @@
+@@ -1026,7 +1082,8 @@
              if (tci_compare64(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -104,7 +121,7 @@
              }
              break;
  #if TCG_TARGET_HAS_ext8u_i64
-@@ -1123,7 +1163,7 @@
+@@ -1123,7 +1180,7 @@
              tb_ptr += sizeof(int32_t);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr += (int32_t)t0;
@@ -113,7 +130,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1273,7 +1313,80 @@
+@@ -1273,7 +1330,80 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -209,13 +226,19 @@
      mmap_lock();
      /* If it is already been done on request of another CPU,
       * just retry.
-@@ -1811,6 +1815,10 @@
+@@ -1811,6 +1815,16 @@
          goto buffer_overflow;
      }
      tb->tc.size = gen_code_size;
 +#ifdef __EMSCRIPTEN__
-+    extern void touchhle_tci_register(uintptr_t, unsigned);
-+    touchhle_tci_register((uintptr_t)tb->tc.ptr, gen_code_size);
++#if !defined(TARGET_ARM) || defined(TARGET_AARCH64) || TARGET_LONG_BITS != 32 || TARGET_INSN_START_WORDS != 3
++#error "touchHLE guest metadata requires the pinned ARM32 search layout"
++#endif
++    extern void touchhle_tci_register(uintptr_t, unsigned, uint32_t, unsigned,
++                                      unsigned, uint32_t, uintptr_t, unsigned);
++    touchhle_tci_register((uintptr_t)tb->tc.ptr, gen_code_size, tb->pc,
++                         tb->size, tb->icount, tb->flags,
++                         (uintptr_t)gen_code_buf + gen_code_size, search_size);
 +#endif
  
      tcg_ctx->code_gen_ptr = (void *)

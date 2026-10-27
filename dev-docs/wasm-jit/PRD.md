@@ -1,47 +1,56 @@
-# Offline IPA-to-web product requirements
+# Optimizing offline ARM-to-Wasm product requirements
 
-Updated: 2026-10-27. User-authorized pivot from online JIT optimization. Active
-engineering objective: build a local converter producing a static per-game web
-package, quantify its performance against JIT, and reduce measured scene loads.
-Historical requirements are preserved in PRD-jit-history.md.
+Updated: 2026-10-27. Active thread goal contains the user's renewed request.
+TinkerBox is the acceptance app; expand to other proprietary IPAs afterward.
 
-## Product
+## Product and baseline
 
-A developer supplies a locally owned ARM32 IPA to a command-line converter.
-The output is a static site containing the game, runtime, precompiled Wasm and
-assets. Visitors open a game player without an IPA-upload form. Execution,
-audio, graphics, input and saves remain local. No execution server is required.
-A Play button may be required for browser audio activation.
+A local CLI converts a locally owned ARM32 IPA into a static game-only website.
+Visitors play without an IPA chooser. CPU execution, graphics, audio, input and
+saves stay on the device; hosting serves static files. Preserve touchHLE's Rust
+HLE, native correctness reference, licenses and existing compatibility fixes.
 
-## Acceptance
+Current a3220587 baseline is profile-assisted TCI-to-Wasm packaging with runtime
+ARM decoding and JIT fallback. It completes both training lessons but shows no
+clear scene-load advantage: three-trial software-GPU medians 143 s offline versus
+148 s JIT. This is not the requested optimizing whole-app compiler.
+User reference: M3 Max MacBook, 16-core CPU, 64 GB RAM; reported ~30 s loads and
+apparently 30–60 FPS. OS/browser and controlled frame-time results are unverified.
 
-- P1: Reproducible CLI package generation; build fingerprints reject mismatched
-  precompiled code. Proprietary packages remain in ignored local output paths.
-- P2: Reuse Rust touchHLE and verified Unicorn ARM/Thumb semantics. Native
-  correctness reference and existing graphics/audio/input fixes remain intact.
-- P3: Emit actual Wasm before visitors run the game; distinguish coverage from
-  file packaging. Report translated blocks, cache hits/misses and fallback.
-- P4: First milestone may use profile-assisted precompilation; it must be labeled
-  as such. Full-app static discovery is a separate milestone. ARM/Thumb mixed
-  code, indirect branches, runtime patches and generated code prevent claiming
-  complete static coverage from a linear sweep. Safe dynamic fallback is allowed
-  and measured; no claim of JIT-free execution unless proved by counters.
-- P5: Compare identical TinkerBox scenes and browser settings on fresh workers:
-  runtime/download, menu startup, level selection-to-interactivity, first 60 s
-  gameplay, compilation time, artifact bytes, precompile time and memory.
-  Target under 10 s level/menu loading and sustained 30 FPS. Report failed targets.
-- P6: Complete Training 01 and Lesson 2 SUCCESS with actual input, pinch/placement,
-  graphics and audio delivery; CPU context/fault/invalidation regressions pass.
-- P7: Profile scene transitions to separate translation, asset reads/decoding,
-  HLE and game initialization. Preload only if measured useful; avoid speculative
-  whole-game asset loading or threads that compete with gameplay.
-- P8: At least three comparable trials before claiming stable game speedup.
-  Software-GPU CI numbers and qualitative laptop reports are separate evidence;
-  cross-browser and physical-device gaps remain explicit.
+## Requirements and acceptance gates
 
-## Non-goals
+- R1: Preserve reproducible local conversion, immutable package identities,
+  corrupt/stale-input rejection and game-only player. Never commit game assets,
+  IPAs, saves or raw proprietary code traces.
+- R2: Generate faster Wasm through measured optimization, including evaluating
+  larger connected regions, safe frontend removal and initialization/HLE costs.
+  Packaging success or more cached blocks alone does not satisfy this gate.
+- R3: Profiling must expose hot instructions/blocks, generated-code composition,
+  helper/HLE costs, compilation, dispatch and scene phases. Separate dynamic
+  counts, sampled self/inclusive time and controlled instruction microbenchmarks.
+  Report unsupported attribution instead of inventing per-instruction timings.
+- R4: Preserve ARM/Thumb/IT/VFP/FPSCR semantics, exceptions, faults, context swaps,
+  budgets/input responsiveness, self-modifying-code invalidation and bounded
+  caches. Safe dynamic fallback is allowed and its frequency must be reported.
+- R5: Full static coverage/frontend removal must be demonstrated using counters
+  and guest-code/state identities. Captured coverage is never proof that every
+  instruction in an IPA was discovered. No JIT-free claim with fallback present.
+- R6: Target <10 s menu/scene loading and sustained >=30 FPS in TinkerBox with
+  functional graphics/audio/input. Both Training 01 and Lesson 2 must reach
+  SUCCESS using real pinch/placement. Keep device/browser limits explicit.
+- R7: Use >=3 comparable clean trials before claiming stable whole-game gain.
+  Report startup/download/validation/preparation, selected-scene latency,
+  first-minute frame/FPS distribution, compilation, artifact bytes and memory.
+  Counter/profiler runs are diagnostic and excluded from acceptance timings.
+- R8: Check native reference and relevant CPU/graphics/audio regressions for
+  affected changes. Record exact commands, failures and decisions in browser.md;
+  keep PROGRESS and HANDOFF current, commit and push verified increments.
 
-No engine rewrite, new UI framework, cloud execution, automatic publishing of
-proprietary games, unsupported compatibility claims or decompilation to source.
-AOT means ARM-to-Wasm translation ahead of play; browsers still compile Wasm
-to their own machine code. It does not precompute arbitrary game initialization.
+## Scope boundaries
+
+No speculative engine rewrite, unrelated compatibility expansion or automatic
+public game deployment. Asset preloading is conditional on measured IO/decode
+cost and memory impact; the existing loader already caches decompressed entries.
+Wasm still needs browser-native compilation. Offline translation cannot precompute
+arbitrary game initialization. The goal remains open until its acceptance gates
+are proven; an individual diagnostic or optimization milestone is not completion.

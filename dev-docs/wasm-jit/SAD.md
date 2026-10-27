@@ -1,63 +1,58 @@
-# Offline precompilation architecture
+# Optimizing offline precompilation architecture
 
-Updated: 2026-10-27. See SAD-jit-history.md for retained runtime architecture.
+Updated: 2026-10-27. Historical JIT design: SAD-jit-history.md.
 
-## Decision
+## Retained execution and packaging
 
-Reuse Unicorn ARM/Thumb -> TCI -> Wasm and Rust HLE. First make generated
-blocks relocatable across engine instances, then build a profile-assisted local
-converter and a static per-game player. Measure before expanding static coverage.
-This staged design avoids implementing a second ARM decoder before proving the
-runtime benefit. It is not yet a whole-app static compiler.
+Reuse Unicorn ARM/Thumb -> TCI -> Wasm and Rust touchHLE. Current portable ABI 3
+binds session move immediates as immutable imports, relocates helper PCs/links
+through a base, and reads live exit identities. Exact normalized bytes and ABI
+metadata select modules. Native builds remain the semantic reference. Static
+player verifies IPA/runtime/archive identities; sites are immutable directories.
 
-## Components and contracts
+## Measurement architecture
 
-1. Existing runtime remains the semantic reference and fallback.
-2. Portable TCI compiler normalizes only known session-relative fields: forward
-   branch addresses, mutable goto links and exit-TB identities. Move immediates are also normalized because they contain engine-private
-   pointers. Portable ABI 3 binds their current values as immutable imports at
-   instantiation; invalidation/re-registration rebinds them for the new block. Other immediates remain exact. An immutable imported base relocates helper PCs and link reads;
-   exit identities are read from the current live TCI. No stale host pointer is
-   trusted. Exact normalized bytes and ABI layout select a module, never hash-only.
-3. Offline capture records portable TCI and layout metadata for observed blocks;
-   a local Node compiler emits Wasm artifacts. Runtime/compiler fingerprints bind
-   the package. Static discovery of unobserved code is a subsequent stage.
-4. Game player checks the manifest/archive identities and hashes the served IPA
-   and runtime files before enabling Play, then asynchronously compiles prebuilt
-   modules, and instantiates matched blocks with current memory/base/helper imports.
-   Existing invalidation, budgets and bounded live-function eviction still apply.
-   Cache misses retain JIT; counters expose actual coverage. ARM-to-TCI translation
-   still occurs in the browser to identify each live block. This milestone removes
-   Wasm generation for matches, not the entire ARM frontend. Eliminating that
-   stage requires exporting translation identities/state and safe guest-code
-   validation, and remains a separate architectural step.
-5. Local packager emits a game-only page and static assets. Shared worker/input/
-   audio paths remain. No CDN, server execution or proprietary Git artifacts.
+Two independent diagnostic modes avoid conflating observer cost with speed:
 
-## Performance risks
+1. Timing mode names generated functions uniquely and samples worker CPU stacks.
+   Aggregate by function identity (including module/script), preserve self versus
+   inclusive time, use actual sample time deltas, and retain caller attribution.
+   Anonymous generated functions must not be merged into one unhelpful bucket.
+2. Count mode instruments generated TCI operations and block entries, including
+   self-loop iterations and taken forward branches. Count operations reached,
+   not static block size multiplied by dispatch count. Include interpreter/JIT
+   coverage gaps and bounded metadata retention. Do not report these as ARM counts.
 
-Browser Wasm compilation cannot be done portably on the producer's machine.
-Thousands of modules, larger downloads, matching cost or eager compilation may
-outweigh saved code generation. Compare on-demand versus async prewarming and
-bound both retained bytes and preparation work. Do not assume JIT dominates:
-previous menu compilation totaled around13 s versus142 s menu wall time.
-Profile-assisted coverage is input dependent. Full static discovery must handle
-Mach-O executable sections, ARM/Thumb entry metadata and dynamic targets without
-executing arbitrary data or silently changing semantics.
+Join sampled blocks with instruction/helper composition and compile statistics.
+A later explicit translator metadata hook must provide guest PC/mode/bytes and
+ARM instruction boundaries before instruction-level ARM attribution is claimed.
+Separate controlled CPU fixtures measure throughput by operation class with
+known counts, dependencies, memory alignment and FPSCR state. Browser sampling
+cannot provide exact nanoseconds for each guest instruction in optimized code.
 
-## Static frontend removal remains separate
+## Optimizing code generation
 
-Current templates still require live ARM-to-TCI translation. A future cache that
-skips this must key by guest code bytes, PC, ARM/Thumb/IT and other translation
-flags; record explicit engine-relative relocations; and reconstruct block exit,
-link and exception/search metadata. It must reject changed code and preserve
-code-page invalidation, faults, budgets and context switches. Merely exporting
-a generated Wasm module or sweeping aligned addresses cannot satisfy these
-contracts. First quantify time in the ARM frontend versus guest initialization
-before committing to this larger change. The three-trial comparison does not
-currently justify it as the main way to reach the level-loading target.
+Use profiles to choose a bounded candidate, measure it in a targeted fixture,
+then verify actual game gains. Region compilation may combine proven connected
+blocks and keep temporary state in locals; preserve budget checks, fault PCs,
+mutable edges, code invalidation, and exits to existing dispatch/HLE. Bound region
+size and preserve fallback for indirect/unknown/changed targets. Previous slower
+tail-call dispatch and scratch-local experiments are negative evidence, not a
+reason to repeat them unchanged. Shipping requires measured benefit and tests.
 
-Serve a generated package as an immutable directory (or replace the whole site
-atomically). Browser checks detect stale/mixed files at startup; they are not a
-sandbox or authentication scheme and do not coordinate files changed mid-run.
-Validation adds measurable startup work, recorded separately from preparation.
+## Eliminating runtime ARM decoding
+
+A translated-code cache must key by guest bytes, PC, ARM/Thumb/IT and translation
+flags; serialize explicit relocations, exits, links and exception/search metadata;
+validate bytes/state before reuse; and invalidate affected regions on mutation.
+Decode unobserved/dynamic code through the existing reference path. Never infer
+code coverage from a linear scan of mixed ARM/Thumb/data. Track frontend time and
+fallback coverage to determine whether this work pays for its complexity.
+
+## Initialization and HLE
+
+Attribute host calls by both self and inclusive time: guest comparator callbacks
+can make a cheap qsort host frame appear expensive. Identify repeated work and
+high-frequency guest/host crossings before optimizing. Preserve libc/ObjC behavior
+and thread/context semantics. Preload only if measured asset IO/decode latency
+is significant; account for memory and gameplay contention. No cloud execution.

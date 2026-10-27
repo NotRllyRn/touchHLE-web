@@ -19,9 +19,25 @@ now describe this scope; original documents retained as *-jit-history.md.
   Performance targets remain unmet; this checks measurement, not target attainment.
 - [ ] A4: static discovery/loading optimizations guided by profiles.
 
-Goal-tool limitation: create_goal rejected replacement because the old unfinished
-objective still exists. It remains paused in tool metadata; do not mark it complete
-to bypass this. User explicitly authorized resumed work with the new scope above.
+New optimizing-precompiler goal is active in thread metadata. The app installed
+it from the full renewed user request; the duplicate create_goal call was rejected
+because this new goal already exists. Previous paused-goal limitation is resolved.
+
+- [x] B0: redefine PRD/SAD/SFDS, preserve baseline, confirm public server stopped.
+- [x] B1: detailed diagnostic counts and sampled timing attribution (56 JS tests; real CPU14926 blocks).
+- [ ] B2: TinkerBox phase profiles and guest ARM metadata/throughput evidence.
+- [ ] B3: measured optimizing code generation and initialization changes.
+- [ ] B4: clean game/device performance acceptance and regression evidence.
+
+Current B2 evidence: early startup translation6.874s inclusive of15.147s sample;
+late startup generated code7.353s self of15.573s. New guest-PC/search metadata
+passes real ARM/Thumb CPU suite and Chromium; fresh startup retains2642 valid
+maps with zero errors/drops. Full runtime rebuild passes. Forward-join
+prototype rejected after no consistent targeted speedup. Two-block fusion probe
+under review; production execution remains unchanged. Details in ../browser.md.
+
+User hardware reference: M3 Max MacBook, 16-core CPU, 64 GB RAM. Browser/OS
+and precise FPS remain unverified; reported ~30 s loads are qualitative.
 
 Current evidence: 37 JS tests and actual CPU/fiber suite pass. Offline mode
 executes 14,926 fixture instances with zero misses/failures. Generated mipmap
