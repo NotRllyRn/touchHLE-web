@@ -52,4 +52,4 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
 
 await copyFile(`${root}web/runtime-worker.js`, `${root}web/dist/runtime-worker.js`);
 
-for (const name of ['audio-proxy.js', 'audio.mjs', 'tci-jit.js', 'tci-precompile.mjs']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);
+for (const name of ['audio-proxy.js', 'audio.mjs', 'tci-jit.js', 'tci-precompile.mjs', 'package-identity.mjs']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);

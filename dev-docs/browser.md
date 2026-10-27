@@ -3330,3 +3330,50 @@ supports reduced compilation work, not reduced game initialization. Next measure
 whether retaining small exact literals restores optimization lost by parameterizing
 all move immediates. Any specialization must preserve exact cache identity and
 cross-engine invalidation; no pointer-range assumption may authorize stale reuse.
+
+
+Selective small-literal prototype (ignored target/tci-jit-specialized.js) retains
+signed-16-bit move values in code/identity and imports other values. Isolated
+3-million-iteration loop, seven trials: ordinary JIT median 5.868 ms, current
+immutable imports 6.765 ms, specialization 6.738 ms, current repeat 6.735 ms.
+No useful gain; reject without an ABI change or production compiler edit.
+All counters/stores agree. Reproduce with target/bench-specialized-immediates.mjs
+on current ABI3 source; log target/aot-specialized-immediates-bench.log.
+
+Review found browser player lacked the fingerprint validation promised by SAD:
+producer validated trace/core, but a stale deployed file could pass to the player.
+Shared package-identity module now defines fixed file names/identity shape and
+uses browser SHA-256 to check served IPA/runtime bytes before Play. Reject
+mismatched archive identity too. No Wasm/compiler/CPU/native code changed.
+Validation is startup work; publish immutable directories or atomically replace
+the full package because it does not coordinate mid-session server mutations.
+
+`node web/build.mjs` succeeds. Initial fixture package command used nonexistent
+target/browser-hle-mipmap.ipa and failed ENOENT (aot-integrity-package.log);
+corrected to target/browser-mipmap-test.ipa. Final `node --test web/test/*.test.mjs`
+37 pass (target/aot-integrity-js-final.log). CLI rejection regression:
+`node web/test-precompile-cli.mjs target/browser-mipmap-test.ipa
+target/aot-mipmap-globals/capture.json` passes wrong IPA/core trace and existing
+output checks (target/aot-integrity-cli.log).
+
+Generated mipmap and presentation/buffer packages from existing captures and
+ran `web/test-precompiled.mjs` twice per package: all 130/103 instances offline,
+zero misses/compiler failures; clean guest exits. Each script additionally
+rejects altered game IPA, core Wasm, compiler JS and archive identity before
+Play; no worker starts for corrupt bytes. Logs target/aot-integrity-mipmap-
+{package,browser-final}.log and target/aot-integrity-present-{package,browser}.log.
+The previously recorded full CPU suite is still applicable: compiler/runtime
+execution code did not change.
+
+Isolated command `node web/precompile-ipa.mjs '/root/local-ipas/TinkerBox HD 1.4.1.ipa'
+target/aot-tinker-verified --capture target/tinker-aot-capture.json` completes in
+35,266.65 ms from the existing trace, excluding interactive capture. 15,646
+templates / 38,491,889 Wasm bytes / 66,016,467 archive bytes. Only final player
+format guard was copied afterward; compiled modules and core are unchanged.
+Three fresh Chromium contexts on localhost: page ready 3420.18/3315.41/3283.15 ms;
+file validation 2208.1/2178.3/2168.8 ms. Readiness precedes Play/menu/level loading.
+Third context starts real TinkerBox and executes offline blocks, zero compiler
+failures, then deliberately stops. target/check-tinker-package.mjs and
+aot-tinker-verified-{build,smoke}.log. This smoke is not a repeat of full lesson
+acceptance; prior full-lesson and three-trial results use identical runtime and
+compiled-module bytes. Public preview remains off; no benchmark left running.

@@ -22,7 +22,8 @@ runtime benefit. It is not yet a whole-app static compiler.
 3. Offline capture records portable TCI and layout metadata for observed blocks;
    a local Node compiler emits Wasm artifacts. Runtime/compiler fingerprints bind
    the package. Static discovery of unobserved code is a subsequent stage.
-4. Browser validates the package fingerprint, asynchronously compiles prebuilt
+4. Game player checks the manifest/archive identities and hashes the served IPA
+   and runtime files before enabling Play, then asynchronously compiles prebuilt
    modules, and instantiates matched blocks with current memory/base/helper imports.
    Existing invalidation, budgets and bounded live-function eviction still apply.
    Cache misses retain JIT; counters expose actual coverage. ARM-to-TCI translation
@@ -43,3 +44,20 @@ previous menu compilation totaled around13 s versus142 s menu wall time.
 Profile-assisted coverage is input dependent. Full static discovery must handle
 Mach-O executable sections, ARM/Thumb entry metadata and dynamic targets without
 executing arbitrary data or silently changing semantics.
+
+## Static frontend removal remains separate
+
+Current templates still require live ARM-to-TCI translation. A future cache that
+skips this must key by guest code bytes, PC, ARM/Thumb/IT and other translation
+flags; record explicit engine-relative relocations; and reconstruct block exit,
+link and exception/search metadata. It must reject changed code and preserve
+code-page invalidation, faults, budgets and context switches. Merely exporting
+a generated Wasm module or sweeping aligned addresses cannot satisfy these
+contracts. First quantify time in the ARM frontend versus guest initialization
+before committing to this larger change. The three-trial comparison does not
+currently justify it as the main way to reach the level-loading target.
+
+Serve a generated package as an immutable directory (or replace the whole site
+atomically). Browser checks detect stale/mixed files at startup; they are not a
+sandbox or authentication scheme and do not coordinate files changed mid-run.
+Validation adds measurable startup work, recorded separately from preparation.

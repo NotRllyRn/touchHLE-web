@@ -23,7 +23,7 @@ Goal-tool limitation: create_goal rejected replacement because the old unfinishe
 objective still exists. It remains paused in tool metadata; do not mark it complete
 to bypass this. User explicitly authorized resumed work with the new scope above.
 
-Current evidence: 35 JS tests and actual CPU/fiber suite pass. Offline mode
+Current evidence: 37 JS tests and actual CPU/fiber suite pass. Offline mode
 executes 14,926 fixture instances with zero misses/failures. Generated mipmap
 and presentation games pass twice each; TinkerBox and JIT reference complete
 both lessons, including pinch, placement and SUCCESS.
@@ -38,10 +38,19 @@ added to the 83.64 MB IPA. Artifact growth and browser compilation remain costs.
 
 The loading CPU sample is dominated by guest execution/CPU dispatch/HLE;
 asset decompression is not a leading entry and decompressed entries are already
-cached. Next bounded experiment: specialize stable small move literals in offline
-modules while binding other immediates per engine. Exact identities must prevent
-wrong reuse. Full static ARM discovery/frontend removal and <10 s/device targets
+cached. Selective small-literal specialization was probed and rejected: no useful
+targeted speedup. Browser package validation now rejects stale/mixed inputs
+before Play; 37 JS tests and generated-player corruption regressions pass.
+Full static ARM discovery/frontend removal and <10 s/device targets
 remain unfinished. Private artifacts stay under target/.
+
+Latest deliverable: target/aot-tinker-verified, rebuilt from the existing capture
+in 35.267 s. Three localhost page-ready checks: 3.420/3.315/3.283 s, including
+2.208/2.178/2.169 s validating IPA/runtime hashes. This is before game startup,
+not a level-load result. Smoke starts actual precompiled TinkerBox blocks with
+zero compiler failures. Engine/compiled Wasm bytes match the accepted previous
+package. Full performance report: PERFORMANCE.md. Public preview remains off.
+
 
 Historical JIT milestones/evidence follow; they do not certify AOT acceptance.
 

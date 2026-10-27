@@ -253,7 +253,8 @@ Unseen blocks still use JIT. ARM-to-TCI decoding also remains in the browser
 to produce the exact current block identity; the offline artifact currently
 eliminates repeated TCI-to-Wasm generation for matching blocks. This is not yet
 a full-app static ARM recompiler. Browsers
-still compile the supplied Wasm to native code. Performance comparison is ongoing.
+still compile the supplied Wasm to native code. Three-trial results show no clear scene-load improvement; see
+[measurements](../dev-docs/wasm-jit/PERFORMANCE.md).
 
 With a built runtime and local Playwright available:
 
@@ -279,11 +280,18 @@ regression fixtures. The package includes the original game archive and base64
 Wasm modules in precompiled.json; it does not publish or upload anything.
 `build-report.json` records artifact sizes and offline build time. Logs distinguish
 AOT preparation time, precompiled block instances, misses and fallback compilation.
+The player verifies manifest/archive identity and served IPA/runtime SHA-256
+hashes before enabling Play; verification time is logged separately. Publish the
+output as one immutable directory, or replace it atomically, to keep runtime files
+consistent throughout a session.
 Do not interpret successful packaging or synthetic fixtures as TinkerBox acceptance.
 
 Tests: `node --test web/test/tci-precompile.test.mjs web/test/tci-jit.test.mjs`.
 `web/test-precompiled.mjs` checks two fresh runs of a generated original test IPA,
-actual offline-module execution, clean guest exit and static GET-only traffic.
+actual offline-module execution, clean guest exit, static GET-only traffic and
+rejection of altered IPA/runtime/compiler/archive files before Play.
+`node web/test-precompile-cli.mjs FIXTURE.ipa CAPTURE.json` checks producer
+rejection of mismatched IPA/core fingerprints and an existing output directory.
 
 For complete CPU/fiber regression coverage, build the shared CPU fixture first
 (`node web/build-shared-cpu.mjs` with the SDK activated), then run

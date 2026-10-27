@@ -13,7 +13,9 @@ Updated: 2026-10-27. Previous CPU/graphics contracts: SFDS-jit-history.md.
   output and behavior remain the default unless portable mode is selected.
 - A2: Offline CLI capture/compile/package. Emit actual Wasm, versioned metadata,
   content fingerprint and a static per-game player. No IPA chooser in output.
-  Reject corrupt/incompatible packages; report profile-assisted coverage honestly.
+  Reject corrupt/incompatible packages before Play: verify IPA/runtime hashes
+  and archive identity. Exercise changed IPA, runtime, compiler and archive plus
+  CLI trace mismatch and existing-directory rejection. Report coverage honestly.
 - A3: Clean JIT/precompiled TinkerBox comparisons and both-lesson regressions.
   Preserve raw local artifacts, commands, trial counts and any failed checks.
 - A4: Profile loading; expand static discovery and optimize measured initialization

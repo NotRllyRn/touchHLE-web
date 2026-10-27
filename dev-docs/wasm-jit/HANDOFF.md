@@ -20,7 +20,8 @@ under the new objective; PROGRESS.md tracks that work independently.
   is copied to web/dist by both build scripts. Public server remains off.
 - Local diagnostic servers:127.0.0.1:8765 serves web/dist;127.0.0.1:8766 serves
   ignored target/. Do not expose target/ publicly; it includes private artifacts.
-- Latest package: target/aot-tinker-globals. Original owned IPA:
+- Latest package: target/aot-tinker-verified (same guest/compiler Wasm, verified
+  player). Comparison package: target/aot-tinker-globals. Original owned IPA:
   /root/local-ipas/TinkerBox HD 1.4.1.ipa. No proprietary content committed.
 - Runtime compiler portable ABI 3; archive/trace outer format 1. Older raw TCI
   traces with ABI 1/2 can be recompiled against the same core runtime.
@@ -45,7 +46,7 @@ core fingerprints guard reuse. Caches retain existing bounds and invalidation.
 
 ## Validation and measurements
 
-- 35 JS tests pass; actual ARM/Thumb/VFP/FPSCR/context/SVC/fault/budget/invalidation/
+- 37 JS tests pass; actual ARM/Thumb/VFP/FPSCR/context/SVC/fault/budget/invalidation/
  eviction/fiber suite passes capture and offline modes:14,926 offline instances,
  0 misses/failures,61 templates. Final logs target/aot-immutable-*-final.log.
 - Initial immutable-import test found10 large-block compile failures. Fixed
@@ -88,18 +89,33 @@ summary target/aot-repeat-driver.log. Inspector exit1 follows deliberate UI Stop
 drivers terminate intentionally. Full lesson correctness was checked separately.
 Previous late-driver immutable attempt remains discarded.
 
+## Latest follow-up
+
+Small-literal specialization prototype is rejected: loop median 6.738 ms versus
+6.765/6.735 ms original; no demonstrated gain. Only ignored target/ copies
+exist. No portable ABI change: still 3.
+
+Player now verifies manifest/archive identity and IPA/runtime hashes before
+Play. Final JS 37 pass; two fresh runs each of mipmap/presentation fixtures and
+corrupt IPA/runtime/compiler/archive rejections pass. CLI rejects wrong IPA/core
+trace and existing output directory. Runtime/CPU code is unchanged.
+
+Verified TinkerBox package build from existing trace: 35.267 s. Browser page
+ready 3.420/3.315/3.283 s; validation 2.208/2.178/2.169 s. These are before
+guest startup. Actual precompiled-block smoke passes with zero compiler failures.
+No new scene-speedup claim. Full report: PERFORMANCE.md.
+
 ## Next steps
 
-1. Measure selective constant specialization: keep small move literals exact in
-   module identity and generated Wasm; bind remaining immediates per engine.
-   This is an optimization experiment, not evidence of static ARM discovery.
-2. Retain only measured changes with CPU/fixture/game regressions. Update
-   PROGRESS/browser.md with failures as well as gains; commit/push tested work.
-3. Full static discovery/translation-cache restoration requires explicit guest
-   code/CPU-state validation and relocation/search-data handling. Do not ship an
-   unsafe whole-binary linear sweep or claim current ARM decoding is eliminated.
-4. Sub-10-second/device acceptance is open. Avoid repeating rejected dispatch,
-   tail-call, scratch and float-side-exit experiments without new evidence.
+1. Obtain controlled hardware-GPU/device measurements of loading and frame times;
+   user laptop report remains qualitative. Current host uses CPU SwiftShader.
+2. Attribute remaining CPU time to guest initialization/HLE calls versus ARM
+   translation before expanding the static frontend. The new SAD records the
+   required guest-code/state/relocation/exception metadata contracts.
+3. Full static ARM frontend removal, <10 s scenes and physical-device acceptance
+   remain unfinished. Do not mark the old goal complete to replace its metadata.
+4. Avoid repeating rejected small-literal, dispatch, tail-call, scratch and
+   float-side-exit experiments without new evidence. No benchmark is running.
 
 No subagents authorized. Proprietary code/assets/traces remain under ignored
 local paths. SDK target/emsdk; Playwright module
