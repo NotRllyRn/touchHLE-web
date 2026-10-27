@@ -1,6 +1,6 @@
 --- a/qemu/target/arm/unicorn_arm.c
 +++ b/qemu/target/arm/unicorn_arm.c
-@@ -14,6 +14,15 @@
+@@ -14,6 +14,31 @@
  #include "inttypes.h"
  
  ARMCPU *cpu_arm_init(struct uc_struct *uc);
@@ -11,6 +11,22 @@
 +UNICORN_EXPORT uint32_t *touchHLE_uc_arm_regs(uc_engine *uc)
 +{
 +    return ((CPUARMState *)uc->cpu->env_ptr)->regs;
++}
++
++// SVC has already advanced PC. The adapter's immutable page map may bypass
++// general memory lookup; retain the public read path for absent/cross-page data.
++UNICORN_EXPORT int32_t touchHLE_uc_svc(uc_engine *uc)
++{
++    CPUARMState *env = (CPUARMState *)uc->cpu->env_ptr;
++    unsigned size = env->thumb ? 2 : 4;
++    uint32_t address = env->regs[15] - size, instruction = 0;
++    uint8_t *page = uc->touchhle_read_pages[address >> 12];
++    if (page && (address & 4095) <= 4096 - size) {
++        memcpy(&instruction, page + (address & 4095), size);
++    } else if (uc_mem_read(uc, address, &instruction, size) != UC_ERR_OK) {
++        return -4;
++    }
++    return instruction & (size == 2 ? 0xff : 0xffffff);
 +}
 +#endif
  

@@ -3019,3 +3019,73 @@ Retain bounded CPSR write elision and measured service-call benefit, without
 claiming material whole-game speedup. Under10 s/30 FPS and hardware/mobile
 acceptance remain unmet. Next measured target is interrupt instruction fetching
 (2365 inclusive startup samples), keeping general memory-read fallback.
+
+
+3c165eed CPSR write elision committed/pushed. Next direct-SVC regression adds
+ARM24-bit immediates0xabcdef/0xffffff and Thumb0x80/0xff at ends of both mapped
+code pages, checking one charged instruction and returned PC. Build/run these
+against unchanged interrupt fetching before implementing the new path.
+
+
+SVC page-end/24-bit-immediate tests pass on unchanged interrupt fetching in
+interpreter and JIT (target/jit-direct-svc-reference-{build,node}.log). Candidate
+private helper reads current ARM PC/Thumb state directly, subtracts instruction
+width, and copies from the immutable adapter page only when the complete read
+fits. Missing/cross-page mappings retain uc_mem_read and original -4 failure.
+Interrupt numbers other than2 retain -4. No syndrome shortcut (which would lose
+ARM immediate bits23:16). Added direct API tests for general/cross-page reads,
+unmapped failures, page-end ARM/Thumb and a direct-map read crossing into an
+absent page. Actual CPU build/tests pending; no performance claim yet.
+
+
+Direct-SVC candidate passes actual Node/Chromium interpreter/JIT CPU/cache/
+fiber checks, including explicit direct/general memory cases and ARM/Thumb
+page-end calls; logs target/jit-direct-svc-{build,node,browser}.log. Formatting/
+diff checks pass. Initial benchmark completes with zero compiler failures;
+old-adapter comparison building next. Full production runtime remains3c165eed.
+
+
+Direct-SVC isolated new/old/new runtime comparison (five trials per workload):
+50k service transitions61.294/97.671/59.825 ms (~37–39% less). Linked-blocks
+107.728/108.584/107.324; memory46.929/47.456/48.477; finite-add chain
+148.631/140.540/136.917; negate38.084/38.396/37.071. No consistent broad
+regression; finite-chain first group is slower as in previous experiments.
+All guest assertions pass. Logs target/jit-direct-svc-{benchmark,old-benchmark,
+comparison}.log. Benchmark artifacts restored to candidate. Full runtime rebuild
+underway; graphics and fresh TinkerBox remain required before retention/commit.
+
+
+Direct-SVC full runtime build and all nine forced-JIT graphics fixtures pass
+twice, including local GET-only traffic and zero compiler failures. Logs
+target/jit-direct-svc-{runtime-build,MIPMAP,COMBINE,LIGHTING,LIGHT_ATTENUATION,
+LIGHT_SPOT,FOG,MAPPED,POINT_PARAMETERS,PRESENT_BUFFERS}.log. Clean TinkerBox
+measurement started with normal threshold32; keep competing work off the host
+until loading and first-minute FPS are measured.
+
+
+Direct-SVC clean TinkerBox: menu132 s versus142; Training197 to Play334 =137 s
+versus158 s (~13% less, one clean comparison with10 s screenshot cadence).
+First60 s after Play has49 logged FPS samples, median3.28, range2.46–3.56,
+versus3.27 baseline. Lesson1 SUCCESS412 s; Lesson2 driver match542 s, manually
+verified562 s; real zoom and touch placement pass. Logs target/jit-direct-svc-
+{game,driver}.log, screenshots target/browser-jit-direct-svc. Retain measured
+loading/service-transition gain; no FPS gain claimed. Targets remain unmet.
+
+Only after these clean intervals and both lesson checks, start a15 s browser
+trace across compositor/GPU/task categories. This is diagnostic time, excluded
+from acceptance, to investigate the software-rendering FPS limit independently.
+
+
+Post-acceptance browser trace (15 s,131325 events):38 GLES2::ReadPixels intervals
+total7417.09 ms; command-buffer Finish waits total8022.53 ms (overlapping work,
+not additive). GPU main task intervals union7455.27 ms; worker task intervals
+15188.78 ms include synchronous waiting. This is wall-time tracing, not CPU
+sampling. Compositor DrawAndSwap555.83 ms across49 calls. Raw31 MB trace remains
+local: target/jit-direct-svc-graphics-trace.json; summary/log share that prefix.
+
+Unlike prior query timing (~724 ms/15 s), readback is a major measured wait.
+Next capture readPixels call stacks to distinguish guest requests from the
+EAGL composition fallback; do not assume the caller from timing alone. Existing
+find_fullscreen_eagl_layer can avoid CPU readback when its strict geometry
+requirements hold. Inspect actual layer state before changing those requirements.
+Game stopped through UI after trace; inspector exit1 expected, driver0.

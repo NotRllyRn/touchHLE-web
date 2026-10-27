@@ -1,6 +1,22 @@
 # Acceleration progress
 
-Updated: 2026-10-26. Thread goal: active.
+Updated: 2026-10-27. Thread goal: active.
+
+## Current checkpoint
+
+- Verified candidate: bounded direct SVC fetch. Both lessons pass; menu132 s,
+  level137 s (previous158 s), first-minute logged FPS median3.28.
+  Chromium141/SwiftShader; no hardware GPU. Ready for commit/push.
+- CPU and nine graphics regressions pass. Service-transition benchmark~38% faster;
+  single clean game level-load comparison~13% faster; no FPS gain claimed.
+- Next: trace readPixels callers/layer geometry. Post-acceptance trace shows
+  38 readbacks occupying7.4 s of15 s, explaining much of worker waiting.
+- Remaining acceptance: under10 s loading, >=30 FPS with correct simulation/input
+  timing, three fresh trials, and browser/device coverage per PRD. Goal unmet.
+- Avoid repeating rejected dispatch-table expansion, tail-call/table dispatch,
+  ordinary Wasm dispatch loop, private scratch promotion and float side exits
+  without new evidence; exact negative results are recorded in ../browser.md.
+
 
 - [x] Inspect current CPU adapter and historical clean game acceptance.
 - [x] Create PRD, SAD and SFDS with measurable acceptance and regression gates.
@@ -480,3 +496,38 @@ Menu142 s, level158 s unchanged, first-minute FPS median3.27 (50 samples).
 Retain measured9–18% service-call improvement with no material game-speed claim.
 Next inspect bounded direct SVC instruction reads, identified in startup stacks.
 Goal and M4/M5 remain open.
+
+
+3c165eed pushed. Added SVC immediate/page-boundary regression cases; checking
+them against the unchanged adapter before bounded direct instruction fetch.
+
+
+Original interrupt implementation passes new page-end/full-immediate cases.
+Bounded direct SVC fetch implemented with general-read fallback; added explicit
+fallback/unmapped/cross-page tests. Shared CPU validation and benchmark pending.
+
+
+Direct-SVC CPU/cache/fiber checks pass in Node and Chromium. Candidate benchmark
+passes guest assertions; alternating old/new comparison pending. Production
+game runtime remains CPSR-only3c165eed; no game performance claim yet.
+
+
+Direct-SVC new/old/new service-transition medians61.294/97.671/59.825 ms
+(~38% less), five trials each; other workloads broadly similar. Actual CPU
+regressions pass. Full runtime rebuilding; graphics/game validation and commit
+remain pending. Goal unchanged and unmet.
+
+
+Direct-SVC runtime rebuild and nine graphics fixtures pass twice. Clean game
+measurement in progress; retention/commit and game results remain pending.
+
+
+Direct-SVC clean game passes both lessons, zoom/placement. Menu132 s; level137 s
+versus158 (~13% less, single run), FPS median3.28 unchanged. Retain candidate;
+post-acceptance graphics trace underway, then document/commit/push. Goal unmet.
+
+
+Post-acceptance graphics trace identifies38 ReadPixels calls totaling7.4 s/15 s
+(overlapping Finish waits8.0 s). Need caller stacks before choosing a graphics
+change. Existing EAGL slow composition path is one candidate, not yet proven.
+Game stopped cleanly via UI; direct-SVC changes ready to commit/push.

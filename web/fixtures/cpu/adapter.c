@@ -86,6 +86,20 @@ void adapter_checks(void) {
     assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == 0x42);
     assert(regs[0] == (equal ? 42 : 7) && regs[15] == 0x2004);
   }
+  // Preserve full ARM immediates and Thumb width at mapped page ends.
+  for (unsigned thumb_mode = 0; thumb_mode < 2; ++thumb_mode) {
+    unsigned size = thumb_mode ? 2 : 4;
+    touchHLE_DynarmicWrapper_set_cpsr(cpu, thumb_mode ? 0x30 : 0x10);
+    for (unsigned page = 1; page <= 2; ++page) for (unsigned variant = 0; variant < 2; ++variant) {
+      uint32_t immediate = thumb_mode ? (variant ? 0xff : 0x80) : (variant ? 0xffffff : 0xabcdef);
+      uint32_t instruction = (thumb_mode ? 0xdf00 : 0xef000000) | immediate;
+      memcpy((uint8_t *)code + page * 4096 - size, &instruction, size);
+      touchHLE_DynarmicWrapper_invalidate_cache_range(cpu, page * 4096, 4096);
+      regs[15] = (page + 1) * 4096 - size; ticks = 100;
+      assert(touchHLE_DynarmicWrapper_run_or_step(cpu, code, &ticks) == (int32_t)immediate);
+      assert(regs[15] == (page + 1) * 4096 && ticks == 99);
+    }
+  }
   // A tiny abstract budget may overshoot by one translated block, but must
   // terminate even in a long-block infinite loop and saturate at zero ticks.
   for (unsigned i = 0; i < 512; i++) code[i] = 0xe2800001;

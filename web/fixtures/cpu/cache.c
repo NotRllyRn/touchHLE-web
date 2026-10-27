@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <emscripten.h>
 #include <unicorn/unicorn.h>
 static void reg(uc_engine *cpu, int id, uint32_t value) {
@@ -19,7 +20,33 @@ static void stop_read(uc_engine *cpu, uc_mem_type type, uint64_t address,
   ++*(unsigned *)user;
   assert(uc_emu_stop(cpu) == UC_ERR_OK);
 }
+extern int32_t touchHLE_uc_svc(uc_engine *);
+extern void touchHLE_uc_read_region(uc_engine *, uint32_t, uint32_t, void *);
+static void svc_fetch_checks(void) {
+  uc_engine *cpu;
+  assert(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &cpu) == UC_ERR_OK);
+  assert(uc_mem_map(cpu, 0x1000, 8192, UC_PROT_ALL) == UC_ERR_OK);
+  uint32_t instruction = 0xefabcdef;
+  assert(uc_mem_write(cpu, 0x1ffe, &instruction, 4) == UC_ERR_OK);
+  reg(cpu, UC_ARM_REG_PC, 0x2002); reg(cpu, UC_ARM_REG_CPSR, 0x10);
+  assert(touchHLE_uc_svc(cpu) == 0xabcdef); // General read, including page crossing.
+  reg(cpu, UC_ARM_REG_PC, 0x6000);
+  assert(touchHLE_uc_svc(cpu) == -4); // Unmapped instruction retains failure.
+  uint8_t *page = calloc(1, 4096); assert(page);
+  assert(uc_mem_map_ptr(cpu, 0x8000, 4096, UC_PROT_ALL, page) == UC_ERR_OK);
+  touchHLE_uc_read_region(cpu, 0x8000, 4096, page);
+  instruction = 0xefffffff; memcpy(page + 4092, &instruction, 4);
+  reg(cpu, UC_ARM_REG_PC, 0x9000);
+  assert(touchHLE_uc_svc(cpu) == 0xffffff);
+  reg(cpu, UC_ARM_REG_PC, 0x9002);
+  assert(touchHLE_uc_svc(cpu) == -4); // Guard direct read crossing into an absent page.
+  page[4094] = 0x81; page[4095] = 0xdf;
+  reg(cpu, UC_ARM_REG_PC, 0x9000); reg(cpu, UC_ARM_REG_CPSR, 0x30);
+  assert(touchHLE_uc_svc(cpu) == 0x81);
+  assert(uc_close(cpu) == UC_ERR_OK); free(page);
+}
 void cache_checks(void) {
+  svc_fetch_checks();
   uc_engine *cpu;
   assert(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &cpu) == UC_ERR_OK);
   assert(uc_mem_map(cpu, 0x1000, 0x4000, UC_PROT_ALL) == UC_ERR_OK);

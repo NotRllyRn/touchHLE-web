@@ -15,6 +15,7 @@ extern void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining);
 extern int32_t touchHLE_uc_remaining(uc_engine *uc);
 extern void touchHLE_uc_read_region(uc_engine *uc, uint32_t base, uint32_t size, void *pointer);
 extern uint32_t *touchHLE_uc_arm_regs(uc_engine *uc);
+extern int32_t touchHLE_uc_svc(uc_engine *uc);
 static bool invalid_memory(uc_engine *uc, uc_mem_type type, uint64_t address,
                            int size, int64_t value, void *user) {
   (void)value; (void)user;
@@ -27,13 +28,7 @@ static bool invalid_memory(uc_engine *uc, uc_mem_type type, uint64_t address,
 }
 static void interrupt(uc_engine *uc, uint32_t number, void *user) {
   Cpu *cpu = user;
-  uint32_t pc, cpsr, instruction = 0;
-  uc_reg_read(uc, UC_ARM_REG_PC, &pc);
-  uc_reg_read(uc, UC_ARM_REG_CPSR, &cpsr);
-  unsigned size = (cpsr & 0x20) ? 2 : 4;
-  if (number == 2 && uc_mem_read(uc, pc-size, &instruction, size) == UC_ERR_OK)
-    cpu->result = instruction & (size == 2 ? 0xff : 0xffffff);
-  else cpu->result = -4;
+  cpu->result = number == 2 ? touchHLE_uc_svc(uc) : -4;
   uc_emu_stop(uc);
 }
 Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {

@@ -247,3 +247,18 @@ Every execution still reads CPSR back, including flags, Thumb and IT state.
 Existing mode-bank, ARM/Thumb/IT, context, stepping and nested-fiber regressions
 exercise this boundary. Measure alternating new/old/new service-call throughput
 and full-game loading before retention. No attempt to elide execution-end reads.
+
+
+## Bounded SVC reads
+
+For interrupt2, size is2 when env.thumb is nonzero, otherwise4. Compute unsigned
+address=regs[15]-size. Use touchhle_read_pages[address>>12] only if non-null and
+(address&4095)<=4096-size; copy size bytes into a zero-initialized word. Otherwise
+call uc_mem_read, returning-4 on failure. Mask0xff or0xffffff respectively.
+Other interrupts still return-4, and every interrupt stops the engine.
+
+Regression gates: original adapter first passes full24-bit/page-end SVC cases;
+new helper tests cover ordinary mapped fallback, cross-page reads, unmapped
+failures and direct-map crossing into an absent page. Existing ARM/Thumb budget,
+context/cache and nested-fiber tests remain required, followed by alternating
+service-call benchmarks and clean game acceptance.

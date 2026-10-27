@@ -164,3 +164,13 @@ contexts dirty; mark setters dirty when they change the shadow, preserving an
 already pending dirty write. On run entry, write CPSR only when dirty, keeping
 the existing integer-register snapshot/restore around that write for banking.
 Native CPU behavior and public adapter ABI remain unchanged.
+
+
+## SVC instruction fetching
+
+A private browser-only Unicorn helper reads live PC/Thumb state at interrupt
+entry. Decode the full ARM24-bit or Thumb8-bit immediate from the instruction
+preceding PC. The existing immutable adapter page map permits a bounded direct
+copy when the entire instruction fits; otherwise use uc_mem_read. Preserve its
+read-failure result and the adapter's behavior for other interrupt numbers.
+Do not decode from exception syndrome, which retains only16 immediate bits.
