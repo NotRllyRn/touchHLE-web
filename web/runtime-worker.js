@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
-importScripts('./touchhle-runtime.js', './audio-proxy.js');
+importScripts('./touchhle-runtime.js', './audio-proxy.js', './guest-saves.js', './external-open.js', './text-input.js');
 self.onmessage = async ({ data }) => {
   if (data.type !== 'start') return;
   self.onmessage = null; // One guest per worker; Stop destroys the instance.
-  let runtime;
+  let runtime, saves;
   try {
     if (!(data.file instanceof Blob) || data.file.size > 256 * 1024 * 1024) throw new Error('Invalid or oversized IPA');
+    const text = self.TouchHLEText.worker(message => self.postMessage(message));
+    const external = self.TouchHLEExternal.workerController(data.externalSession, message => self.postMessage(message));
+    self.addEventListener('message', ({ data: message }) => external.handle(message));
+    if (data.persistentSaves === true) {
+      saves = self.TouchHLESaves.workerController(message => self.postMessage(message), () => self.close());
+      self.onmessage = ({ data: input }) => saves.handle(input);
+    }
     const canvas = data.canvas;
     if (canvas) {
       // SDL's worker video backend needs browser display metadata and a canvas
@@ -24,18 +31,28 @@ self.onmessage = async ({ data }) => {
       };
     }
     runtime = await createTouchHLE({
+      textFocus: (epoch, active) => text.focus(epoch, active),
+      textResult: (sequence, status) => text.result(sequence, status),
+      requestExternalURL: url => external.request(url),
       canvas,
       enableTciJit: data.cpuBackend === 'jit',
       tciJitThreshold: data.jitThreshold === 1 ? 1 : 32,
       noInitialRun: true,
       print: message => self.postMessage({ type: 'log', message }),
       printErr: message => self.postMessage({ type: 'log', message }),
-      onAbort: message => self.postMessage({ type: 'error', message: `${message}\n${new Error().stack}` }),
+      onAbort: message => {
+        text.close(false);
+        const error = { type: 'error', message: `${message}\n${new Error().stack}` };
+        if (saves) void saves.finish(error); else self.postMessage(error);
+      },
       onExit: code => {
+        text.close(false);
         if (runtime.tciJit) self.postMessage({ type: 'log', message: `CPU JIT ${JSON.stringify(runtime.tciJit.stats)}` });
-        self.postMessage({ type: 'exit', code });
+        if (saves) void saves.finish({ type: 'exit', code });
+        else self.postMessage({ type: 'exit', code });
       },
     });
+    text.bind(runtime);
     if (data.cpuBackend === 'jit') importScripts('./tci-jit.js');
     if (data.aotCapture) {
       const keys = new Set(); let bytes = 0;
@@ -65,6 +82,9 @@ self.onmessage = async ({ data }) => {
       self.window = { AudioContext: self.AudioContext };
     }
     self.onmessage = ({ data: input }) => {
+      if (input?.type === 'save-stop') text.close();
+      if (text.handle(input)) return;
+      if (saves?.handle(input)) return;
       if (input.type === 'touches') for (const point of input.points) {
         runtime.ccall('touchhle_web_touch', null,
           ['number', 'number', 'number', 'number', 'number'],
@@ -74,13 +94,18 @@ self.onmessage = async ({ data }) => {
         ['number', 'number', 'number'], [input.kind, input.x, input.y]);
     };
     runtime.FS.writeFile('/app.ipa', new Uint8Array(await data.file.arrayBuffer()));
+    if (saves && !await saves.prepare(runtime.FS)) return;
     self.postMessage({ type: 'log', message: 'Starting the touchHLE loader…' });
     await runtime.ccall('touchhle_web_start', null, ['number'], [data.headless ? 1 : 0], { async: true });
   } catch (error) {
     if (error.name === 'ExitStatus') {
       if (runtime?.tciJit) self.postMessage({ type: 'log', message: `CPU JIT ${JSON.stringify(runtime.tciJit.stats)}` });
-      self.postMessage({ type: 'exit', code: error.status });
+      if (saves) await saves.finish({ type: 'exit', code: error.status });
+      else self.postMessage({ type: 'exit', code: error.status });
     }
-    else self.postMessage({ type: 'error', message: String(error.stack ?? error.message ?? error) });
+    else {
+      const message = { type: 'error', message: String(error.stack ?? error.message ?? error) };
+      if (saves) await saves.finish(message); else self.postMessage(message);
+    }
   }
 };

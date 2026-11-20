@@ -1864,6 +1864,20 @@ impl Environment {
             if let Some(next_awakening) = next_awakening {
                 let duration = next_awakening.duration_since(Instant::now());
                 log_dbg!("All threads blocked/asleep, sleeping for {:?}.", duration);
+                #[cfg(target_os = "emscripten")]
+                if !duration.is_zero() {
+                    // The guest coroutine has yielded; this is the parent stack.
+                    // Let the Worker handle input and save/Stop while waiting.
+                    // The timer is advisory: only the deadline check above may
+                    // unblock a guest thread after we rescan.
+                    unsafe {
+                        extern "C" {
+                            fn touchhle_web_wait(milliseconds: f64);
+                        }
+                        touchhle_web_wait(duration.as_secs_f64() * 1000.0);
+                    }
+                }
+                #[cfg(not(target_os = "emscripten"))]
                 std::thread::sleep(duration);
                 // Try again, there should be some thread awake now (or
                 // there will be soon, since timing is approximate).

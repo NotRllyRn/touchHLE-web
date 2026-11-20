@@ -16,6 +16,8 @@ execFileSync('rustc', ['--edition=2021', '--crate-type=staticlib',
   '--target=wasm32-unknown-emscripten', '-C', 'panic=abort', '-C', 'opt-level=2',
   'web/fixtures/cpu/shared.rs', '-o', 'target/browser-cpu/libshared.a'], { cwd: root, stdio: 'inherit' });
 execFileSync('emcc', ['web/fixtures/cpu/main.c', 'web/fixtures/cpu/adapter.c', 'web/fixtures/cpu/cache.c',
+  'web/fixtures/cpu/float-conversions.c',
+  'web/fixtures/cpu/restore-stop.c',
   'src/web/cpu.c', 'target/browser-cpu/libshared.a',
   `${source}/unicorn/build-wasm-eh/libunicorn.a`, `-I${source}/unicorn/include`,
   '-O2', '-sASSERTIONS=2', '-sALLOW_MEMORY_GROWTH=1', '-sASYNCIFY=1',

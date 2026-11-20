@@ -111,6 +111,7 @@ git -C target/unicorn.js submodule update --init --recursive
 (cd target/unicorn.js && python3 build.py arm)
 node web/patch-unicorn.mjs
 node web/build-shared-cpu.mjs
+node web/test-float-conversions.mjs
 node -e "require('./web/dist/shared-cpu-checks.js')({print: console.log}).catch(e=>{console.error(e.message);process.exitCode=1})"
 TEST_SHARED_CPU=1 TEST_FIBERS=1 \
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
@@ -344,3 +345,74 @@ PC, flags and guest byte span. Repeated contexts do not prove identical code or
 safe restoration: full translation flags and byte validation are separate work.
 `registrationStats.omittedContexts` marks bounded-table overflow. Snapshots travel
 as JSON strings to avoid excessive browser-protocol serialization overhead.
+
+### Browser guest save persistence
+
+Newly built browser pages enable a dedicated IndexedDB database,
+`touchHLE-guest-saves` (schema 1). It stores opaque files under
+`touchHLE_sandbox/<bundle-id>/Documents` and `Library`, separately from HTTP and
+compiled-code caches. It does not serialize CPU state or translate save formats.
+The worker restores those trees before `touchhle_web_start`, because the guest
+filesystem indexes directories during initialization. `tmp` retains its native
+startup-reset behavior and is not persisted.
+
+Successful filesystem mutations schedule a checkpoint on the worker's next
+available one-second interval. Hidden-page/pagehide events request an additional
+checkpoint. Stop releases current contacts, stops input delivery, and waits for
+transaction completion before terminating the worker. Guest exit also waits for
+storage. A failed commit retains the previous database and the dirty live worker;
+keep the tab open and retry Stop. A timeout is not a successful save. Unresponsive
+workers and browser/process crashes cannot guarantee a final checkpoint. Data
+still in the guest's own buffers has not reached the filesystem and is not saved
+by this mechanism; this is not an application-level transaction or a full-session
+snapshot.
+
+A Web Lock permits one save-enabled game worker per origin at a time, preventing
+stale tabs from overwriting each other. Records use the guest bundle directory,
+so changes to an IPA's asset encoding do not create a new save identity. The
+current bounded implementation restores all app records, with a combined 128 MiB
+and 32,768-entry limit. Unsupported schema, corrupt metadata, symbolic links or
+bounds failures are reported rather than reset/omitted. There is no destructive
+schema migration. IndexedDB/Web Locks must be available; save-enabled startup
+fails visibly if safe restoration is unavailable.
+
+Pages request persistent browser storage where supported, but browsers can deny
+that request and users can clear site data. Saves remain local to this browser
+profile and origin. Guest-save import/export and recovery UI are still pending;
+the local IPA picker already imports from the user's device without uploading.
+External `openURL` still exits the guest in UIKit and needs a separate change.
+
+New save dependencies are included in fresh package identities. Rebuild/regenerate
+complete packages together; do not mix these scripts into a frozen older package.
+The currently hosted tested package was deliberately not changed by this source
+implementation. Regression tests: `node --test web/test/saves.test.mjs
+web/test/input.test.mjs web/tb-archive/player.test.mjs web/tb-archive/bridge.test.mjs`.
+Private real-IndexedDB/MEMFS/ARM-fixture results are recorded in
+`target/coordinator-browser-resume-022/`; these are not new real-game progress or
+performance acceptance.
+
+Browser `UIApplication.openURL` requests now keep the guest, Worker, audio and save
+session alive. A bounded HTTP(S) request displays its destination and an explicit
+**Open in new tab** action. If that attempt is blocked, the separate-tab link remains
+available. The emulator page never navigates. Dismiss closes the prompt; Stop
+removes its actions before waiting for the save checkpoint. The guest boolean is
+**request queued**, not proof that a website loaded. Unsupported schemes, invalid
+URLs, excess pending requests and rapid repeats return false with a rate-limited
+visible notice. Identical pending requests share one prompt; recent dismissed URLs
+are suppressed for 30 seconds (at most 32 remembered URLs per Worker). URLs are
+limited to 8192 JavaScript code units, without ASCII spaces/C0/DEL. Browser policy
+or the destination may still refuse to open/load. Native openURL retains its
+existing exit behavior.
+
+Fresh runtime/package generation is required for this Rust/JS bridge and its two
+new dependency identities. Verified packages execute checked controller/policy
+bytes, including the save controller, before launching. This source change does
+not update existing hosted packages. Browser links do not import files; local
+save import/export is a separate outstanding feature.
+
+A remaining runtime limitation is that a guest operation that synchronously blocks
+the Worker (for example, the current all-threads-sleeping path) also delays input
+and save/Stop handling until it yields. The page warns after 15 seconds and keeps
+the session instead of forcing termination. External-link handling does not fix
+that scheduler behavior; closing the browser during a pending save can still lose
+uncommitted progress.

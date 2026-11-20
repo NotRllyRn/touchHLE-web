@@ -70,6 +70,8 @@ for(const name of runtimeFiles)await copyFile(join(root,'web/dist',name),join(ou
 await copyFile(ipa,join(output,'game.ipa'));
 await copyFile(join(root,'web/game.html'),join(output,'index.html'));
 await copyFile(join(root,'web/game.mjs'),join(output,'game.mjs'));
+for (const name of ['game-cache.mjs', 'dashboard.css'])
+  await copyFile(join(root, 'web', name), join(output, name));
 const archive={format:1,abi,identity,blocks};
 await writeFile(join(output,'precompiled.json'),JSON.stringify(archive));
 await writeFile(join(output,'game.json'),JSON.stringify({name:inspection.app.name,format:1,jitThreshold:threshold,

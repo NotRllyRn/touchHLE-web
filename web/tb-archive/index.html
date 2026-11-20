@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+<title>touchHLE game</title>
+<link rel="stylesheet" href="style.css">
+<main>
+  <h1 id="title">touchHLE game</h1>
+  <canvas id="canvas" width="1024" height="768"></canvas>
+  <p id="save-state" role="status">Progress is saved on this browser. Clearing site data removes it.</p>
+  <button id="run" disabled>Play</button><button id="stop" disabled>Stop</button>
+  <p>Tap or click to interact. Pinch with two fingers, or scroll to zoom.</p>
+  <p id="state" role="status">Preparing</p>
+  <details><summary>Diagnostics</summary>
+    <p id="coverage">Partial profile coverage; missing archive entries use normal runtime decoding and JIT.</p>
+    <pre id="status"></pre>
+  </details>
+</main>
+<script type="module" src="game.mjs"></script>
+</html>

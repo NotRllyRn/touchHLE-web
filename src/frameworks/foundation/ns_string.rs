@@ -2131,3 +2131,32 @@ fn string_by_replacing_occurrences_inner(
     *env.objc.borrow_mut(result_ns_string) = StringHostObject::Utf16(result);
     autorelease(env, result_ns_string)
 }
+
+/// Browser edit validation reads built-in UTF16 units without guest dispatch or
+/// lossy conversion. Foreign subclasses and unsupported buffers fail closed.
+#[cfg(target_os = "emscripten")]
+pub(crate) fn bounded_ascii(env: &Environment, string: id, max: usize) -> Option<String> {
+    if string == nil {
+        return Some(String::new());
+    }
+    let host = env
+        .objc
+        .get_host_object(string)?
+        .as_any()
+        .downcast_ref::<StringHostObject>()?;
+    let class = ObjC::read_isa(string, &env.mem);
+    if !matches!(
+        env.objc.try_get_class_name(class),
+        Some("_touchHLE_NSString" | "_touchHLE_NSMutableString" | "_touchHLE_NSString_Static")
+    ) {
+        return None;
+    }
+    let mut out = String::new();
+    for unit in host.iter_code_units() {
+        if out.len() >= max || !(32..=126).contains(&unit) {
+            return None;
+        }
+        out.push(unit as u8 as char);
+    }
+    Some(out)
+}

@@ -1,0 +1,305 @@
+--- a/qemu/include/tcg/tcg.h
++++ b/qemu/include/tcg/tcg.h
+@@ -209,6 +209,15 @@
+ # define TARGET_INSN_START_WORDS (1 + TARGET_INSN_START_EXTRA_WORDS)
+ #endif
+ 
++/* Isolated prototype: explicit build opt-in, no exported runtime ABI. */
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_OPAQUE_PTR_PROTOTYPE)
++# if !defined(TCG_TARGET_INTERPRETER) || !defined(TARGET_ARM) || \
++     TCG_TARGET_REG_BITS != 32 || TARGET_LONG_BITS != 32
++#  error Opaque pointer prototype requires ARM32 wasm32 TCI configuration
++# endif
++# define TCG_OPAQUE_PTR_CAPTURE 1
++#endif
++
+ typedef enum TCGOpcode {
+ #define DEF(name, oargs, iargs, cargs, flags) INDEX_op_ ## name,
+ #include "tcg/tcg-opc.h"
+@@ -612,6 +621,22 @@
+     size_t agg_size_full; /* aggregate size of full regions */
+ };
+ 
++typedef enum TCGPtrRecipe {
++    TCG_PTR_UNKNOWN = 0,
++    TCG_PTR_CURRENT_UC = 1,
++    TCG_PTR_CURRENT_CPU_ICOUNT_DECR_U32 = 2,
++    TCG_PTR_CURRENT_UC_BUDGET = 3,
++} TCGPtrRecipe;
++
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++/* Byte offset is TB-relative and points at the four immediate bytes. */
++typedef struct TCGPtrReloc {
++    uint32_t offset;
++    uint32_t recipe;
++} TCGPtrReloc;
++#define TCG_PTR_RELOC_MAX 256
++#endif
++
+ struct TCGContext {
+     uint8_t *pool_cur, *pool_end;
+     TCGPool *pool_first, *pool_current, *pool_first_large;
+@@ -620,6 +645,13 @@
+     int nb_temps;
+     int nb_indirects;
+     int nb_ops;
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++    /* Set enabled before tcg_func_start; never toggle within a TB. */
++    bool ptr_capture_enabled;
++    bool ptr_capture_rejected;
++    uint32_t ptr_reloc_count;
++    TCGPtrReloc ptr_relocs[TCG_PTR_RELOC_MAX];
++#endif
+ 
+     /* goto_tb support */
+     tcg_insn_unit *code_buf;
+@@ -1195,6 +1227,24 @@
+ # define tcg_const_local_ptr(tcg_ctx, x)  ((TCGv_ptr)tcg_const_local_i64(tcg_ctx, (intptr_t)(x)))
+ #endif
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++TCGv_ptr tcg_materialize_ptr(TCGContext *s, const void *live_value,
++                            TCGPtrRecipe recipe);
++TCGv_ptr tcg_unknown_local_ptr(TCGContext *s, const void *live_value);
++#undef tcg_const_ptr
++#undef tcg_const_local_ptr
++#define tcg_const_ptr(s, x) tcg_materialize_ptr((s), (const void *)(x), TCG_PTR_UNKNOWN)
++#define tcg_const_local_ptr(s, x) tcg_unknown_local_ptr((s), (const void *)(x))
++#else
++static inline TCGv_ptr tcg_materialize_ptr(TCGContext *s,
++                                          const void *live_value,
++                                          TCGPtrRecipe recipe)
++{
++    (void)recipe;
++    return tcg_const_ptr(s, live_value);
++}
++#endif
++
+ TCGLabel *gen_new_label(TCGContext *tcg_ctx);
+ 
+ /**
+--- a/qemu/include/tcg/tcg-opc.h
++++ b/qemu/include/tcg/tcg-opc.h
+@@ -296,6 +296,11 @@
+ #include "tcg-target.opc.h"
+ #endif
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++/* output, live_value, explicit recipe; cargs are never optimizer inputs. */
++DEF(materialize_ptr, 1, 0, 2, TCG_OPF_NOT_PRESENT)
++#endif
++
+ #undef TLADDR_ARGS
+ #undef DATA64_ARGS
+ #undef IMPL
+--- a/qemu/tcg/tcg.c
++++ b/qemu/tcg/tcg.c
+@@ -878,6 +878,10 @@
+ void tcg_func_start(TCGContext *s)
+ {
+     tcg_pool_reset(s);
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++    s->ptr_capture_rejected = false;
++    s->ptr_reloc_count = 0;
++#endif
+     s->nb_temps = s->nb_globals;
+ 
+     /* No temps have been previously allocated for size or locality.  */
+@@ -1152,6 +1156,36 @@
+ }
+ #endif
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++TCGv_ptr tcg_materialize_ptr(TCGContext *s, const void *live_value,
++                            TCGPtrRecipe recipe)
++{
++    TCGv_i32 out;
++    TCGOp *op;
++    if (!s->ptr_capture_enabled) {
++        return (TCGv_ptr)tcg_const_i32(s, (uintptr_t)live_value);
++    }
++    if (recipe < TCG_PTR_CURRENT_UC || recipe > TCG_PTR_CURRENT_UC_BUDGET) {
++        /* Reject at construction, even if optimizer/liveness deletes it. */
++        s->ptr_capture_rejected = true;
++    }
++    out = tcg_temp_new_i32(s);
++    op = tcg_emit_op(s, INDEX_op_materialize_ptr);
++    op->args[0] = tcgv_i32_arg(s, out);
++    op->args[1] = (uintptr_t)live_value;
++    op->args[2] = recipe;
++    return (TCGv_ptr)out;
++}
++
++TCGv_ptr tcg_unknown_local_ptr(TCGContext *s, const void *live_value)
++{
++    if (s->ptr_capture_enabled) {
++        s->ptr_capture_rejected = true;
++    }
++    return (TCGv_ptr)tcg_const_local_i32(s, (uintptr_t)live_value);
++}
++#endif
++
+ /* Return true if OP may appear in the opcode stream.
+    Test the runtime variable that controls each opcode.  */
+ bool tcg_op_supported(TCGOpcode op)
+@@ -3179,6 +3213,43 @@
+     tcg_reg_alloc_do_movi(s, ots, val, op->life, op->output_pref[0]);
+ }
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++/* Never call tcg_reg_alloc_do_movi: that would expose a CONST to out_ri. */
++static void tcg_reg_alloc_materialize_ptr(TCGContext *s, const TCGOp *op)
++{
++    const TCGLifeData arg_life = op->life;
++    TCGTemp *ots = arg_temp(op->args[0]);
++    TCGReg reg;
++    size_t offset;
++
++    tcg_debug_assert(!ots->fixed_reg && ots->type == TCG_TYPE_I32);
++    if (ots->val_type == TEMP_VAL_REG) {
++        s->reg_to_temp[ots->reg] = NULL;
++    }
++    reg = tcg_reg_alloc(s, s->tcg_target_available_regs[TCG_TYPE_I32],
++                        s->reserved_regs, op->output_pref[0], ots->indirect_base);
++    /* Pinned TCI movi_i32 encoding: opcode, size, register, u32 LE. */
++    offset = tcg_current_code_size(s) + 3;
++    tcg_out_movi(s, TCG_TYPE_I32, reg, op->args[1]);
++    ots->reg = reg;
++    ots->val_type = TEMP_VAL_REG;
++    ots->mem_coherent = 0;
++    s->reg_to_temp[reg] = ots;
++    if (s->ptr_reloc_count == TCG_PTR_RELOC_MAX) {
++        s->ptr_capture_rejected = true;
++    } else {
++        TCGPtrReloc *r = &s->ptr_relocs[s->ptr_reloc_count++];
++        r->offset = offset;
++        r->recipe = op->args[2];
++    }
++    if (NEED_SYNC_ARG(0)) {
++        temp_sync(s, ots, s->reserved_regs, op->output_pref[0], IS_DEAD_ARG(0));
++    } else if (IS_DEAD_ARG(0)) {
++        temp_dead(s, ots);
++    }
++}
++#endif
++
+ /*
+  * Specialized code generation for INDEX_op_mov_*.
+  */
+@@ -3776,6 +3847,9 @@
+     //tcg_dump_ops(s, false, "after opt4:");
+     tcg_reg_alloc_start(s);
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++    s->ptr_reloc_count = 0;
++#endif
+     s->code_buf = tb->tc.ptr;
+     s->code_ptr = tb->tc.ptr;
+ 
+@@ -3806,6 +3880,11 @@
+         case INDEX_op_dupi_vec:
+             tcg_reg_alloc_movi(s, op);
+             break;
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++        case INDEX_op_materialize_ptr:
++            tcg_reg_alloc_materialize_ptr(s, op);
++            break;
++#endif
+         case INDEX_op_dup_vec:
+             tcg_reg_alloc_dup(s, op);
+             break;
+--- a/qemu/tcg/optimize.c
++++ b/qemu/tcg/optimize.c
+@@ -1469,6 +1469,12 @@
+             }
+             break;
+ 
++#ifdef TCG_OPAQUE_PTR_CAPTURE
++        case INDEX_op_materialize_ptr:
++            /* Both cargs are opaque. No value or known-zero-bit inference. */
++            reset_temp(op->args[0]);
++            break;
++#endif
+         case INDEX_op_call:
+             if (!(op->args[nb_oargs + nb_iargs + 1]
+                   & (TCG_CALL_NO_READ_GLOBALS | TCG_CALL_NO_WRITE_GLOBALS))) {
+--- a/qemu/include/tcg/tcg-op.h
++++ b/qemu/include/tcg/tcg-op.h
+@@ -33,7 +33,7 @@
+ {
+     TCGv_i32 tsize = tcg_const_i32(tcg_ctx, size);
+     TCGv_i32 ttype;
+-    TCGv_ptr tuc = tcg_const_ptr(tcg_ctx, uc);
++    TCGv_ptr tuc = tcg_materialize_ptr(tcg_ctx, uc, TCG_PTR_CURRENT_UC);
+     TCGv_i64 tpc = tcg_const_i64(tcg_ctx, pc);
+     TCGv_ptr tdata;
+     uc_engine* puc = uc;
+@@ -74,7 +74,7 @@
+ static inline void gen_uc_traceopcode(TCGContext *tcg_ctx, void* hook, TCGv_i64 arg1, TCGv_i64 arg2, uint32_t size, void *uc, uint64_t pc)
+ {
+     TCGv_ptr thook = tcg_const_ptr(tcg_ctx, hook);
+-    TCGv_ptr tuc = tcg_const_ptr(tcg_ctx, uc);
++    TCGv_ptr tuc = tcg_materialize_ptr(tcg_ctx, uc, TCG_PTR_CURRENT_UC);
+     TCGv_i64 tpc = tcg_const_i64(tcg_ctx, pc);
+     TCGv_i32 tsz = tcg_const_i32(tcg_ctx, size);
+ // #if TARGET_LONG_BITS == 32
+--- a/qemu/include/exec/gen-icount.h
++++ b/qemu/include/exec/gen-icount.h
+@@ -36,15 +36,16 @@
+     // Common path: no exit request. Keep the existing helper for actual exits,
+     // including its delay-slot, PC restoration and longjmp semantics.
+     TCGLabel *running = gen_new_label(tcg_ctx);
+-    TCGv_ptr counter = tcg_const_ptr(tcg_ctx,
+-        &cpu_neg(tcg_ctx->uc->cpu)->icount_decr.u32);
++    TCGv_ptr counter = tcg_materialize_ptr(tcg_ctx,
++        &cpu_neg(tcg_ctx->uc->cpu)->icount_decr.u32,
++        TCG_PTR_CURRENT_CPU_ICOUNT_DECR_U32);
+     TCGv_i32 request = tcg_temp_new_i32(tcg_ctx);
+     tcg_gen_ld_i32(tcg_ctx, request, counter, 0);
+     tcg_temp_free_ptr(tcg_ctx, counter);
+     tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_GE, request, 0, running);
+     tcg_temp_free_i32(tcg_ctx, request);
+ #endif
+-    TCGv_ptr puc = tcg_const_ptr(tcg_ctx, tcg_ctx->uc);
++    TCGv_ptr puc = tcg_materialize_ptr(tcg_ctx, tcg_ctx->uc, TCG_PTR_CURRENT_UC);
+     TCGv_i32 tmp = tcg_const_i32(tcg_ctx, 0);
+     // Unicorn:
+     //    We CANT'T use brcondi_i32 here or we will fail liveness analysis
+--- a/qemu/accel/tcg/translator.c
++++ b/qemu/accel/tcg/translator.c
+@@ -92,11 +92,12 @@
+         ops->pc_sync(db, cpu);
+         TCGLabel *ready = gen_new_label(tcg_ctx);
+         TCGv_i32 left = tcg_temp_local_new_i32(tcg_ctx);
+-        TCGv_ptr address = tcg_const_ptr(tcg_ctx, &uc->touchhle_budget);
++        TCGv_ptr address = tcg_materialize_ptr(tcg_ctx, &uc->touchhle_budget,
++            TCG_PTR_CURRENT_UC_BUDGET);
+         tcg_gen_ld_i32(tcg_ctx, left, address, 0);
+         tcg_temp_free_ptr(tcg_ctx, address);
+         tcg_gen_brcondi_i32(tcg_ctx, TCG_COND_GT, left, 0, ready);
+-        TCGv_ptr engine = tcg_const_ptr(tcg_ctx, uc);
++        TCGv_ptr engine = tcg_materialize_ptr(tcg_ctx, uc, TCG_PTR_CURRENT_UC);
+         gen_helper_touchhle_budget_stop(tcg_ctx, engine);
+         tcg_temp_free_ptr(tcg_ctx, engine);
+         // pc_sync above already describes this unexecuted block. Return
+@@ -107,7 +108,8 @@
+         touchhle_budget_op = tcg_last_op(tcg_ctx);
+         tcg_gen_sub_i32(tcg_ctx, left, left, count);
+         tcg_temp_free_i32(tcg_ctx, count);
+-        address = tcg_const_ptr(tcg_ctx, &uc->touchhle_budget);
++        address = tcg_materialize_ptr(tcg_ctx, &uc->touchhle_budget,
++            TCG_PTR_CURRENT_UC_BUDGET);
+         tcg_gen_st_i32(tcg_ctx, left, address, 0);
+         tcg_temp_free_ptr(tcg_ctx, address);
+         tcg_temp_free_i32(tcg_ctx, left);
+--- a/qemu/tcg/tcg-op.c
++++ b/qemu/tcg/tcg-op.c
+@@ -2859,7 +2859,7 @@
+         return;
+     }
+ 
+-    TCGv_ptr puc = tcg_const_ptr(tcg_ctx, tcg_ctx->uc);
++    TCGv_ptr puc = tcg_materialize_ptr(tcg_ctx, tcg_ctx->uc, TCG_PTR_CURRENT_UC);
+     TCGv_i32 tmp = tcg_const_i32(tcg_ctx, 0);
+     // Unicorn:
+     //    We CANT'T use brcondi_i32 here or we will fail liveness analysis

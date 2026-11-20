@@ -158,20 +158,36 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)openURL:(id)url { // NSURL
+    #[cfg(target_os = "emscripten")]
+    if url == nil || msg![env; url isFileURL] {
+        // FileURL.absoluteString currently returns a raw guest path. Do not let
+        // a path resembling https:// be mistaken for an external network URL.
+        let _ = crate::window::open_url(env, "");
+        return false;
+    }
     let ns_string = msg![env; url absoluteString];
     let url_string = ns_string::to_rust_string(env, ns_string);
-    if let Err(e) = crate::window::open_url(env, &url_string) {
-        echo!("App opened URL {:?} unsuccessfully ({}), exiting.", url_string, e);
-    } else {
-        echo!("App opened URL {:?}, exiting.", url_string);
+    #[cfg(target_os = "emscripten")]
+    {
+        // Browser admission only: true means a bounded link request is pending,
+        // not that a tab opened. Keep the guest, Worker, audio and saves alive.
+        crate::window::open_url(env, &url_string).is_ok()
     }
+    #[cfg(not(target_os = "emscripten"))]
+    {
+        if let Err(e) = crate::window::open_url(env, &url_string) {
+            echo!("App opened URL {:?} unsuccessfully ({}), exiting.", url_string, e);
+        } else {
+            echo!("App opened URL {:?}, exiting.", url_string);
+        }
 
-    // iPhone OS doesn't really do multitasking, so the app expects to close
-    // when a URL is opened, e.g. Super Monkey Ball keeps opening the URL every
-    // frame! Super Monkey Ball also doesn't check whether opening failed, so
-    // it's probably best to always exit.
-    exit(env);
-    true
+        // iPhone OS doesn't really do multitasking, so the app expects to close
+        // when a URL is opened, e.g. Super Monkey Ball keeps opening the URL every
+        // frame! Super Monkey Ball also doesn't check whether opening failed, so
+        // it's probably best to always exit.
+        exit(env);
+        true
+    }
 }
 
 // TODO: ignore touches

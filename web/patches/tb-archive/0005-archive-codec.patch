@@ -1,0 +1,451 @@
+--- a/qemu/accel/tcg/touchhle-tb-archive.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -1,5 +1,6 @@
+ /* Isolated exact-runtime ARM32 TCI archive prototype.
+- * Same LGPL-2.1-or-later terms as translate-all.c. No serialized ABI.
++ * Same LGPL-2.1-or-later terms as translate-all.c. Experimental versioned
++ * codec; no stable ABI.
+  */
+ #if !defined(TCG_OPAQUE_PTR_CAPTURE)
+ #error TB restore requires the explicit opaque pointer prototype
+@@ -333,12 +334,12 @@
+  * Only scratch is changed until ALL bounds/relocations/search checks succeed.
+  */
+ static bool th_code(THEntry *e, CPUState *cpu, TranslationBlock *tb,
+-                    bool capture)
++                    bool capture, bool validate)
+ {
+     uint8_t starts[TH_CODE_MAX] = {0};
+     uint32_t labels[TH_CODE_MAX / 6];
+     unsigned label_count = 0, pos = 0, ptr_seen = 0, jump_seen = 0, i;
+-    uintptr_t base = (uintptr_t)tb->tc.ptr;
++    uintptr_t base = validate ? 0 : (uintptr_t)tb->tc.ptr;
+     if ((base & 3) || !th_search(e)) {
+         return false;
+     }
+@@ -368,13 +369,16 @@
+             for (i = 0; i < e->ptr_count; ++i) {
+                 if (e->ptrs[i].offset == pos) {
+                     uint32_t recipe = e->ptrs[i].recipe;
+-                    if (!th_ptr(cpu, recipe) ||
++                    if (recipe < TCG_PTR_CURRENT_UC ||
++                        recipe > TCG_PTR_CURRENT_UC_BUDGET ||
++                        (!validate && !th_ptr(cpu, recipe)) ||
+                         th_u32(e->code + pos) !=
+                             (capture ? th_ptr(cpu, recipe) : recipe)) {
+                         return false;
+                     }
+-                    th_put32(e->code + pos,
+-                             capture ? recipe : th_ptr(cpu, recipe));
++                    th_put32(e->code + pos, capture || validate
++                                                ? recipe
++                                                : th_ptr(cpu, recipe));
+                     ++ptr_seen;
+                 }
+             }
+@@ -457,7 +461,9 @@
+                 if (x != 0 && x != 4 && x != 5 && x != 7) {
+                     return false;
+                 }
+-                x = x ? (uintptr_t)tb + (x - 4) : 0;
++                if (!validate) {
++                    x = x ? (uintptr_t)tb + (x - 4) : 0;
++                }
+             }
+             memcpy(e->code + pos, &x, 8);
+             pos += 8;
+@@ -476,7 +482,9 @@
+                 if (!touchhle_tb_static_helper_value(v, &canonical)) {
+                     return false;
+                 }
+-                th_put32(e->code + pos, canonical);
++                if (!validate) {
++                    th_put32(e->code + pos, canonical);
++                }
+             }
+             pos += 4;
+             break;
+@@ -546,6 +554,8 @@
+     }
+     return ptr_seen == e->ptr_count;
+ }
++#include "touchhle-tb-codec.inc.c"
++
+ static bool th_restore(CPUState *cpu, TranslationBlock *tb, const THKey *key,
+                        int *code_size, int *search_size)
+ {
+@@ -564,7 +574,7 @@
+             (uintptr_t)s->code_gen_highwater < (uintptr_t)tb->tc.ptr ||
+             e->code_size + e->search_size >
+                 (uintptr_t)s->code_gen_highwater - (uintptr_t)tb->tc.ptr ||
+-            !th_code(&th_work, cpu, tb, false)) {
++            !th_code(&th_work, cpu, tb, false, false)) {
+             ++th_stats[4];
+             continue;
+         }
+@@ -624,7 +634,7 @@
+     memcpy(e->guest,
+            cpu->uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095),
+            tb->size);
+-    if (!th_code(e, cpu, tb, true)) {
++    if (!th_code(e, cpu, tb, true, false)) {
+         ++th_stats[4];
+         return;
+     }
+@@ -696,3 +706,7 @@
+     return !th_search(e);
+ }
+ #endif
++
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++#include "touchhle-tb-codec-tests.inc.c"
++#endif
+--- /dev/null
++++ b/qemu/accel/tcg/touchhle-tb-codec-tests.inc.c
+@@ -0,0 +1,68 @@
++/* Codec-only synthetic scalar/provenance seam; LGPL-2.1-or-later. */
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++/* The scalar starts numerically equal to A's engine pointer. Only the second
++ * movi has pointer provenance. Never execute this synthetic block. */
++uint32_t touchhle_tb_archive_test_scalar(struct uc_struct *uc, unsigned insert,
++                                         uint32_t scalar)
++{
++    THEntry *e = NULL;
++    TranslationBlock tb = {0};
++    uint32_t aligned[8] = {0};
++    unsigned i;
++    if (insert) {
++        if (th_used == TH_ARCHIVE_SLOTS) {
++            return 0;
++        }
++        e = &th_entries[th_used++];
++        memset(e, 0, sizeof(*e));
++        scalar = (uintptr_t)uc;
++        e->key.contract = 1;
++        e->key.pc = 0x3000;
++        e->key.max_insns = 1;
++        e->size = 4;
++        e->icount = 1;
++        e->search_size = 4;
++        e->code_size = 24;
++        e->reset[0] = e->reset[1] = TB_JMP_RESET_OFFSET_INVALID;
++        e->guest[0] = 0x00;
++        e->guest[1] = 0xf0;
++        e->guest[2] = 0x20;
++        e->guest[3] = 0xe3; /* ARM nop */
++        e->code[0] = e->code[7] = INDEX_op_movi_i32;
++        e->code[1] = e->code[8] = 7;
++        e->code[2] = 0;
++        e->code[9] = 1;
++        th_put32(e->code + 3, scalar);
++        th_put32(e->code + 10, TCG_PTR_CURRENT_UC);
++        e->code[14] = INDEX_op_exit_tb;
++        e->code[15] = 10;
++        e->ptr_count = 1;
++        e->ptrs[0].offset = 10;
++        e->ptrs[0].recipe = TCG_PTR_CURRENT_UC;
++        e->seal = th_seal(e);
++        th_next = th_used % TH_ARCHIVE_SLOTS;
++    } else {
++        if ((uint32_t)(uintptr_t)uc == scalar) {
++            return 0; /* Fixture must actually prove different numerical values.
++                       */
++        }
++        for (i = 0; i < th_used; ++i) {
++            if (th_entries[i].key.pc == 0x3000) {
++                e = &th_entries[i];
++                break;
++            }
++        }
++    }
++    if (!e || !th_canonical(e)) {
++        return 0;
++    }
++    th_work = *e;
++    tb.tc.ptr = aligned;
++    if (!th_code(&th_work, uc->cpu, &tb, false, false) ||
++        th_u32(th_work.code + 3) != scalar ||
++        th_u32(th_work.code + 10) != (uint32_t)(uintptr_t)uc) {
++        return 0;
++    }
++    return insert ? scalar : 1;
++}
++#endif
+--- /dev/null
++++ b/qemu/accel/tcg/touchhle-tb-codec.inc.c
+@@ -0,0 +1,236 @@
++/* Experimental local-capture persistence codec.
++ * Same LGPL-2.1-or-later terms as translate-all.c.
++ * No native structure, padding, seal, or captured address is serialized.
++ */
++#define TH_ID_MAX 4096
++#define TH_WIRE_MAX                                                            \
++    (28 + TH_ID_MAX +                                                          \
++     TH_ARCHIVE_SLOTS *                                                        \
++         (96 + 8 * TCG_PTR_RELOC_MAX + 4096 + TH_CODE_MAX + TH_SEARCH_MAX))
++
++typedef struct THWire {
++    uint8_t *out;
++    const uint8_t *in;
++    uint32_t pos, len;
++    bool ok;
++} THWire;
++
++/* Subtraction bounds before every addition, including size-only export. */
++static void th_wire_bytes(THWire *w, uint8_t *bytes, uint32_t n)
++{
++    if (!w->ok || w->pos > w->len || n > w->len - w->pos) {
++        w->ok = false;
++        return;
++    }
++    if (w->in) {
++        memcpy(bytes, w->in + w->pos, n);
++    } else if (w->out) {
++        memcpy(w->out + w->pos, bytes, n);
++    }
++    w->pos += n;
++}
++static void th_wire_int(THWire *w, uint64_t *v, unsigned n)
++{
++    uint8_t b[8];
++    unsigned i;
++    for (i = 0; i < n; ++i) {
++        b[i] = *v >> (8 * i);
++    }
++    th_wire_bytes(w, b, n);
++    if (w->in && w->ok) {
++        *v = 0;
++        for (i = 0; i < n; ++i) {
++            *v |= (uint64_t)b[i] << (8 * i);
++        }
++    }
++}
++#define TH_FIELD(field, width)                                                 \
++    do {                                                                       \
++        uint64_t value = (field);                                              \
++        th_wire_int(w, &value, width);                                         \
++        (field) = value;                                                       \
++    } while (0)
++/* Deliberately check before assigning C bool (which normalizes invalid input).
++ */
++static bool th_wire_bool(THWire *w, bool *v)
++{
++    uint64_t value = *v;
++    th_wire_int(w, &value, 1);
++    if (!w->ok || value > 1) {
++        return false;
++    }
++    *v = value;
++    return true;
++}
++static bool th_wire_record(THWire *w, THEntry *e)
++{
++    unsigned i;
++    uint32_t start = w->pos, size = 0;
++    TH_FIELD(size, 4);
++    TH_FIELD(e->key.contract, 8);
++    TH_FIELD(e->key.features, 8);
++    TH_FIELD(e->key.exit, 8);
++    TH_FIELD(e->key.pc, 4);
++    TH_FIELD(e->key.cs_base, 4);
++    TH_FIELD(e->key.flags, 4);
++    TH_FIELD(e->key.cflags, 4);
++    TH_FIELD(e->key.trace, 4);
++    TH_FIELD(e->key.model, 4);
++    TH_FIELD(e->key.mode, 4);
++    TH_FIELD(e->key.max_insns, 4);
++    if (!th_wire_bool(w, &e->key.budget_active) ||
++        !th_wire_bool(w, &e->key.budget_adapter) ||
++        !th_wire_bool(w, &e->key.no_exit_request)) {
++        return false;
++    }
++    TH_FIELD(e->code_size, 4);
++    TH_FIELD(e->search_size, 4);
++    TH_FIELD(e->size, 4);
++    TH_FIELD(e->icount, 4);
++    TH_FIELD(e->ptr_count, 4);
++    for (i = 0; i < 2; ++i) {
++        TH_FIELD(e->reset[i], 2);
++    }
++    for (i = 0; i < 2; ++i) {
++        TH_FIELD(e->jump[i], 4);
++    }
++    if (!th_wire_bool(w, &e->no_exit_after) || !w->ok || !e->key.contract ||
++        !e->key.max_insns || e->size > sizeof(e->guest) ||
++        e->code_size > sizeof(e->code) || e->search_size > sizeof(e->search) ||
++        e->ptr_count > TCG_PTR_RELOC_MAX) {
++        return false;
++    }
++    for (i = 0; i < e->ptr_count; ++i) {
++        TH_FIELD(e->ptrs[i].offset, 4);
++        TH_FIELD(e->ptrs[i].recipe, 4);
++    }
++    th_wire_bytes(w, e->guest, e->size);
++    th_wire_bytes(w, e->code, e->code_size);
++    th_wire_bytes(w, e->search, e->search_size);
++    if (!w->ok) {
++        return false;
++    }
++    if (w->in) {
++        return size == w->pos - start;
++    }
++    if (w->out) {
++        THWire patch = {.out = w->out, .pos = start, .len = w->len, .ok = true};
++        uint64_t length = w->pos - start;
++        th_wire_int(&patch, &length, 4);
++    }
++    return true;
++}
++#undef TH_FIELD
++
++/* Reuse the canonical checker without resolving engine pointers. It only
++ * writes to scratch; canonical goto padding/targets must already be zero. */
++static bool th_canonical(const THEntry *e)
++{
++    th_work = *e;
++    return th_code(&th_work, NULL, NULL, false, true) &&
++           !memcmp(th_work.code, e->code, e->code_size);
++}
++static bool th_wire_header(THWire *w, const uint8_t *identity,
++                           uint32_t identity_len, uint32_t total,
++                           uint32_t *count)
++{
++    uint8_t magic[8] = {'T', 'H', 'T', 'B', 'L', 'E', 0, 0}, got[8];
++    uint64_t version = 1, flags = 0, length = total, entries = *count;
++    uint64_t idlen = identity_len;
++    memcpy(got, magic, 8);
++    th_wire_bytes(w, got, 8);
++    th_wire_int(w, &version, 4);
++    th_wire_int(w, &flags, 4);
++    th_wire_int(w, &length, 4);
++    th_wire_int(w, &entries, 4);
++    th_wire_int(w, &idlen, 4);
++    if (!w->ok || memcmp(got, magic, 8) || version != 1 || flags ||
++        length != total || entries > TH_ARCHIVE_SLOTS ||
++        idlen != identity_len || idlen > w->len - w->pos) {
++        return false;
++    }
++    if (w->in && memcmp(w->in + w->pos, identity, identity_len)) {
++        return false;
++    }
++    /* write path copies only; caller identity is never modified */
++    if (w->out) {
++        memcpy(w->out + w->pos, identity, identity_len);
++    }
++    w->pos += identity_len;
++    *count = entries;
++    return true;
++}
++uint32_t touchhle_tb_archive_export(const uint8_t *identity,
++                                    uint32_t identity_len, uint8_t *output,
++                                    uint32_t capacity)
++{
++    THWire w = {.len = TH_WIRE_MAX, .ok = true};
++    uint32_t i, count = th_used, total;
++    if (!identity || !identity_len || identity_len > TH_ID_MAX) {
++        return 0;
++    }
++    /* Dry run validates every record before writing anything to output. */
++    w.pos = 28 + identity_len;
++    for (i = 0; i < count; ++i) {
++        if (th_entries[i].seal != th_seal(&th_entries[i]) ||
++            !th_canonical(&th_entries[i]) || !th_wire_record(&w, &th_work)) {
++            return 0;
++        }
++    }
++    total = w.pos;
++    if (!output) {
++        return total;
++    }
++    if (capacity < total) {
++        return 0;
++    }
++    w = (THWire){.out = output, .len = total, .ok = true};
++    if (!th_wire_header(&w, identity, identity_len, total, &count)) {
++        return 0;
++    }
++    for (i = 0; i < count; ++i) {
++        th_work = th_entries[i];
++        if (!th_wire_record(&w, &th_work)) {
++            return 0;
++        }
++    }
++    return w.pos == total ? total : 0;
++}
++int touchhle_tb_archive_import(const uint8_t *identity, uint32_t identity_len,
++                               const uint8_t *input, uint32_t length)
++{
++    THEntry *pending;
++    THWire w = {.in = input, .len = length, .ok = true};
++    uint32_t i, j, count = 0;
++    bool ok = false;
++    if (!identity || !identity_len || identity_len > TH_ID_MAX || !input ||
++        length < 28 || length > TH_WIRE_MAX ||
++        !th_wire_header(&w, identity, identity_len, length, &count)) {
++        return 0;
++    }
++    pending = g_try_malloc0(sizeof(th_entries));
++    if (!pending) {
++        return 0;
++    }
++    for (i = 0; i < count; ++i) {
++        if (!th_wire_record(&w, &pending[i]) || !th_canonical(&pending[i])) {
++            goto done;
++        }
++        for (j = 0; j < i; ++j) {
++            if (!memcmp(&pending[i].key, &pending[j].key, sizeof(THKey))) {
++                goto done;
++            }
++        }
++        pending[i].seal = th_seal(&pending[i]);
++    }
++    if (w.pos != length) {
++        goto done;
++    }
++    memcpy(th_entries, pending, sizeof(th_entries));
++    th_used = count;
++    th_next = count % TH_ARCHIVE_SLOTS;
++    ok = true;
++done:
++    g_free(pending);
++    return ok;
++}
+--- a/qemu/include/tcg/touchhle-tb-archive.h
++++ b/qemu/include/tcg/touchhle-tb-archive.h
+@@ -5,9 +5,24 @@
+ struct uc_struct;
+ /* Nonzero contract asserts identical immutable CPU model/configuration and
+  * fixed direct-memory adapter policy. Zero unbinds; mandatory before uc_close.
+- * Single-threaded, non-reentrant use, within ONE loaded module only. */
++ * Single-threaded, non-reentrant use, with caller-bound runtime identity for
++ * persistence. */
+ int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract);
+ void touchhle_tb_archive_clear(void);
++/* Explicit runtime/configuration descriptor, 1..4096 bytes, compared exactly.
++ * Caller binds configured CPUs separately and promises immutable configuration.
++ * Descriptor MUST identify exact runtime/helper/opcode ABI and config, not just
++ * the numeric contract. No automatic complete configuration attestation.
++ * Export: NULL output queries size; otherwise capacity must suffice. 0 fails.
++ * Import: 1 succeeds atomically, 0 leaves archive/counters unchanged.
++ * Local trusted captures only; no executable-safety or authentication claim.
++ * Single thread, nonreentrant. Canonical imported bytes are never published.
++ */
++uint32_t touchhle_tb_archive_export(const uint8_t *identity,
++                                    uint32_t identity_len, uint8_t *output,
++                                    uint32_t capacity);
++int touchhle_tb_archive_import(const uint8_t *identity, uint32_t identity_len,
++                               const uint8_t *input, uint32_t length);
+ /* 0 captures, 1 restores, 2 eligible misses, 3 gen_intermediate_code calls,
+  * 4 capture/restore rejections. Counters are module-wide. */
+ uint64_t touchhle_tb_archive_stat(unsigned counter);
+--- a/qemu/tcg/tcg.c
++++ b/qemu/tcg/tcg.c
+@@ -661,7 +661,7 @@
+ };
+ 
+ #ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
+-/* IDs are only valid in this exact module instance: all_helpers contains the
++/* IDs require the caller-bound exact runtime ABI: all_helpers contains the
+  * actual TCI adapter pointers, never helper-proto's incompatible signatures. */
+ bool touchhle_tb_static_helper_id(uint32_t value, uint32_t *id)
+ {

@@ -1,0 +1,73 @@
+--- a/src/lib/libglemu.js
++++ b/src/lib/libglemu.js
+@@ -1272,7 +1272,8 @@
+         }
+         // TODO: remove this. The color should not be part of the key!
+         this.computeKey2 = function() {
+-          return this.envColor[0] * 16777216 + this.envColor[1] * 65536 + this.envColor[2] * 256 + 1 + this.envColor[3];
++          // Color is draw state, not a shader variant. Fractional keys alias in CMapTree.
++          return 0;
+         }
+         this.recomputeKey = function() {
+           this.key0 = this.computeKey0();
+@@ -1497,17 +1498,7 @@
+             return abort_noSupport("Unsupported combiner: " + ptrToString(combiner));
+         }
+ 
+-        var constantExpr = [
+-          "vec4(",
+-            valToFloatLiteral(this.envColor[0]),
+-            ", ",
+-            valToFloatLiteral(this.envColor[1]),
+-            ", ",
+-            valToFloatLiteral(this.envColor[2]),
+-            ", ",
+-            valToFloatLiteral(this.envColor[3]),
+-          ")",
+-        ].join("");
++        var constantExpr = "u_texEnvColor" + texUnitID;
+         var src0Expr = (argsNeeded >= 1) ? genCombinerSourceExpr(texUnitID, constantExpr, passInputVar, srcArr[0], opArr[0])
+                                          : null;
+         var src1Expr = (argsNeeded >= 2) ? genCombinerSourceExpr(texUnitID, constantExpr, passInputVar, srcArr[1], opArr[1])
+@@ -1606,6 +1597,7 @@
+         },
+ 
+         getUsedTexUnitList: () => s_requiredTexUnitsForPass,
++        getTexEnvColor: (texUnitID) => s_texUnits[texUnitID].env.envColor,
+ 
+         getActiveTexture: () => s_activeTexture,
+ 
+@@ -2220,6 +2212,7 @@
+               texUnitAttribList += 'attribute vec4 ' + aTexCoordPrefix + texUnit + ';\n';
+               texUnitVaryingList += 'varying vec4 ' + vTexCoordPrefix + texUnit + ';\n';
+               texUnitUniformList += 'uniform sampler2D ' + uTexUnitPrefix + texUnit + ';\n';
++              texUnitUniformList += 'uniform vec4 u_texEnvColor' + texUnit + ';\n';
+               vsTexCoordInits += '  ' + vTexCoordPrefix + texUnit + ' = ' + aTexCoordPrefix + texUnit + ';\n';
+ 
+               if (GLImmediate.useTextureMatrix) {
+@@ -2469,6 +2462,12 @@
+             GLctx.useProgram(prevBoundProg);
+           }
+ 
++          this.textureEnvColorLocations = [];
++          if (!useCurrProgram) {
++            for (var unit = 0; unit < GLImmediate.MAX_TEXTURES; unit++) {
++              this.textureEnvColorLocations[unit] = GLctx.getUniformLocation(this.program, "u_texEnvColor" + unit);
++            }
++          }
+           this.textureMatrixLocations = [];
+           for (var i = 0; i < GLImmediate.MAX_TEXTURES; i++) {
+             this.textureMatrixLocations[i] = GLctx.getUniformLocation(this.program, `u_textureMatrix${i}`);
+@@ -2687,6 +2686,12 @@
+             GLctx.vertexAttrib4fv(this.colorLocation, GLImmediate.clientColor);
+           }
+ #endif
++          if (!GL.currProgram) {
++            for (var unit = 0; unit < this.textureEnvColorLocations.length; unit++) {
++              var location = this.textureEnvColorLocations[unit];
++              if (location) GLctx.uniform4fv(location, GLImmediate.TexEnvJIT.getTexEnvColor(unit));
++            }
++          }
+           if (this.hasFog) {
+             if (this.fogColorLocation) GLctx.uniform4fv(this.fogColorLocation, GLEmulation.fogColor);
+             if (this.fogEndLocation) GLctx.uniform1f(this.fogEndLocation, GLEmulation.fogEnd);

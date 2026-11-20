@@ -68,8 +68,8 @@ pub fn find_fullscreen_eagl_layer(env: &mut Environment) -> id {
 
     let mut layer: id = msg![env; top_window layer];
 
-    // Descend through the hierarchy, looking only at the last layer in each
-    // list of children, since that should be the one on top.
+    // Descend through the hierarchy, following the last child that could render.
+    // Hidden children without animations cannot affect the composed image.
     // TODO: this is not correct once we support zPosition.
     loop {
         assert!(layer != nil);
@@ -96,7 +96,19 @@ pub fn find_fullscreen_eagl_layer(env: &mut Environment) -> id {
             return nil;
         }
 
-        if let Some(&next) = layer_host_obj.sublayers.last() {
+        let next = layer_host_obj
+            .sublayers
+            .iter()
+            .rev()
+            .copied()
+            .find(|&child| {
+                let child = env.objc.borrow::<CALayerHostObject>(child);
+                // Animations can make a model-hidden layer visible in presentation.
+                !(child.hidden
+                    && child.animations.is_empty()
+                    && child.anonymous_animations.is_empty())
+            });
+        if let Some(next) = next {
             layer = next;
         } else {
             break;

@@ -1,0 +1,218 @@
+--- a/qemu/accel/tcg/touchhle-tb-archive.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -141,24 +141,45 @@
+             k->contract = th_engines[i].contract;
+         }
+     }
+-    if (!k->contract || !uc->touchhle_direct_memory || phys == (tb_page_addr_t)-1 ||
+-        !uc->touchhle_read_pages[tb->pc >> 12] ||
++    if (!k->contract || !uc->touchhle_direct_memory ||
++        phys == (tb_page_addr_t)-1 || !uc->touchhle_read_pages[tb->pc >> 12] ||
+         qemu_map_ram_ptr(uc, NULL, phys) !=
+-            uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095) || (tb->cflags & ~CF_CLUSTER_MASK) != 0 ||
+-        cpu->singlestep_enabled || !QTAILQ_EMPTY(&cpu->breakpoints) ||
+-        !QTAILQ_EMPTY(&cpu->watchpoints) || uc->count_hook || uc->use_exits ||
+-        uc->nested_level != 1 || uc->invalid_error ||
+-        FIELD_EX32(tb->flags, TBFLAG_AM32, THUMB) ||
+-        FIELD_EX32(tb->flags, TBFLAG_AM32, CONDEXEC) ||
+-        FIELD_EX32(tb->flags, TBFLAG_ANY, SS_ACTIVE) ||
++            uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095) ||
++        (tb->cflags & ~CF_CLUSTER_MASK) != 0 || cpu->singlestep_enabled ||
++        !QTAILQ_EMPTY(&cpu->breakpoints) || !QTAILQ_EMPTY(&cpu->watchpoints) ||
++        uc->count_hook || uc->use_exits || uc->nested_level != 1 ||
++        uc->invalid_error || FIELD_EX32(tb->flags, TBFLAG_ANY, SS_ACTIVE) ||
+         FIELD_EX32(tb->flags, TBFLAG_ANY, PSTATE_SS)) {
+         return false;
+     }
+-    /* Deliberately reject every hook, including valid-memory and inline hooks.
+-     */
++    /* Narrow Thumb2, little-endian code only. Legacy split BL, M-profile,
++     * BE code and noncanonical IT entry states retain the frontend fallback. */
++    if (FIELD_EX32(tb->flags, TBFLAG_AM32, THUMB)) {
++        unsigned it = FIELD_EX32(tb->flags, TBFLAG_AM32, CONDEXEC);
++        if (!arm_feature(env, ARM_FEATURE_THUMB2) ||
++            arm_feature(env, ARM_FEATURE_M) ||
++            (uc->mode & UC_MODE_BIG_ENDIAN) ||
++            FIELD_EX32(tb->flags, TBFLAG_A32, SCTLR_B) ||
++            (it && (!(it & 15) || (it >> 4) >= 14))) {
++            return false;
++        }
++    } else if (FIELD_EX32(tb->flags, TBFLAG_AM32, CONDEXEC)) {
++        return false;
++    }
++    /* These callbacks are dispatched by cpu-exec/cputlb at runtime. They
++     * never insert translation-dependent callback pointers into TCI. All
++     * translation/code/opcode/valid-memory/custom hook lists remain barred,
++     * even when a hook is pending deletion or outside this TB's address. */
+     for (i = 0; i < UC_HOOK_MAX; ++i) {
+-        if (uc->hook[i].head) {
+-            return false;
++        struct list_item *item;
++        bool runtime =
++            i == UC_HOOK_INTR_IDX || (i >= UC_HOOK_MEM_READ_UNMAPPED_IDX &&
++                                      i <= UC_HOOK_MEM_FETCH_PROT_IDX);
++        for (item = uc->hook[i].head; item; item = item->next) {
++            struct hook *h = item->data;
++            if (!runtime || (h->type & ~(UC_HOOK_INTR | UC_HOOK_MEM_INVALID))) {
++                return false;
++            }
+         }
+     }
+     k->max_insns = max_insns;
+@@ -224,28 +245,59 @@
+ {
+     const uint8_t *p = e->search, *end;
+     uint32_t data[3] = {e->key.pc, 0, 0};
++    bool thumb = FIELD_EX32(e->key.flags, TBFLAG_AM32, THUMB);
++    unsigned align = thumb ? 2 : 4;
++    unsigned it = FIELD_EX32(e->key.flags, TBFLAG_AM32, CONDEXEC);
++    unsigned guest_off = 0;
++    bool no_exit_after = e->key.no_exit_request;
+     int64_t off = 0;
+     unsigned i, j;
+     int32_t d;
+-    if (!e->size || e->size > 4096 || (e->size & 3) || (e->key.pc & 3) ||
+-        (e->key.pc & 4095) + e->size > 4096 || !e->icount ||
+-        e->icount > TCG_MAX_INSNS || !e->code_size ||
++    if (!e->size || e->size > 4096 || (e->size % align) ||
++        (e->key.pc % align) || (e->key.pc & 4095) + e->size > 4096 ||
++        !e->icount || e->icount > TCG_MAX_INSNS ||
++        e->icount > e->key.max_insns || !e->code_size ||
+         e->code_size > TH_CODE_MAX || !e->search_size ||
+         e->search_size > TH_SEARCH_MAX || e->ptr_count > TCG_PTR_RELOC_MAX) {
+         return false;
+     }
+     end = p + e->search_size;
+     for (i = 0; i < e->icount; ++i) {
++        unsigned width = 4;
+         for (j = 0; j < 3; ++j) {
+             if (!th_sleb(&p, end, &d)) {
+                 return false;
+             }
+             data[j] += (uint32_t)d;
+         }
+-        /* ARM state only: no initial or internal IT state. */
+-        if (data[0] < e->key.pc ||
+-            (uint64_t)data[0] >= (uint64_t)e->key.pc + e->size ||
+-            (data[0] & 3) || data[1] != 0 || !th_sleb(&p, end, &d) || d < 0) {
++        /* Search identity is exact, not just aligned/in-range. Every row
++         * must name the next instruction and its pre-instruction IT state.
++         * This is a width/IT validator, not another instruction translator. */
++        if (guest_off >= e->size || data[0] != e->key.pc + guest_off ||
++            data[1] != it || !th_sleb(&p, end, &d) || d < 0) {
++            return false;
++        }
++        if (thumb) {
++            unsigned h =
++                e->guest[guest_off] | ((unsigned)e->guest[guest_off + 1] << 8);
++            width = (h >> 11) >= 0x1d ? 4 : 2;
++            no_exit_after = (it & 15) != 0;
++            if ((h & 0xff00) == 0xbf00 && (h & 15)) {
++                /* Reject nested/unpredictable IT; match trans_IT plus the
++                 * translator's unconditional advance below. */
++                if (it || ((h >> 4) & 15) >= 14) {
++                    return false;
++                }
++                it = h & 255;
++            } else if (it & 15) {
++                it = (it & 0xe0) | ((it << 1) & 0x1f);
++                if (!(it & 15)) {
++                    it = 0;
++                }
++            }
++        }
++        guest_off += width;
++        if (guest_off > e->size) {
+             return false;
+         }
+         off += d;
+@@ -253,7 +305,8 @@
+             return false;
+         }
+     }
+-    return p == end;
++    return p == end && guest_off == e->size &&
++           (!thumb || e->no_exit_after == no_exit_after);
+ }
+ /* Explicitly supported numeric-only TCI layouts. Unknown opcodes fail closed.
+  * RI values are integers, never classified by their numeric address range. */
+@@ -370,7 +423,7 @@
+                 return false;
+             }
+             ++pos; /* TCGCond is from this exact encoder. */
+-            /* fall through */
++                   /* fall through */
+         case INDEX_op_br:
+         branch_label:
+             if (end - pos != 4 || label_count == ARRAY_SIZE(labels)) {
+@@ -592,3 +645,54 @@
+     th_entries[i] = *e;
+     ++th_stats[0];
+ }
++
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++/* In-process fault injection only. Never present in a normal prototype build.
++ * Re-sealing deliberately bypasses the accidental-corruption gate, so these
++ * execution tests reach the semantic search/IT validator itself. */
++static unsigned th_test_max_insns;
++void touchhle_tb_archive_test_limit(unsigned n) { th_test_max_insns = n; }
++void touchhle_tb_archive_test_no_exit(struct uc_struct *uc, bool value)
++{
++    uc->no_exit_request = value;
++}
++int touchhle_tb_archive_test_search(unsigned kind)
++{
++    THEntry *e;
++    const uint8_t *p;
++    int32_t d;
++    unsigned j;
++    if (!th_used || kind > 4) {
++        return 0;
++    }
++    e = &th_entries[0];
++    if (!th_search(e) || e->search[0] != 0) {
++        return 0;
++    }
++    p = e->search;
++    for (j = 0; j < 3; ++j) {
++        if (!th_sleb(&p, e->search + e->search_size, &d)) {
++            return 0;
++        }
++    }
++    switch (kind) {
++    case 0:
++        e->search[0] = 2;
++        break; /* Aligned, wrong first guest PC. */
++    case 1:
++        e->search[1] ^= 1;
++        break; /* Incorrect initial IT state. */
++    case 2:
++        e->no_exit_after = !e->no_exit_after;
++        break;
++    case 3:
++        e->search[p - e->search] = 0x7f;
++        break; /* Negative host offset. */
++    case 4:
++        e->size -= 2;
++        break; /* Truncated mixed-width guest span. */
++    }
++    e->seal = th_seal(e);
++    return !th_search(e);
++}
++#endif
+--- a/qemu/accel/tcg/translate-all.c
++++ b/qemu/accel/tcg/translate-all.c
+@@ -1763,6 +1763,13 @@
+     tb->trace_vcpu_dstate = *cpu->trace_dstate;
+     tcg_ctx->tb_cflags = cflags;
+  tb_overflow:
++#if defined(TOUCHHLE_TB_RESTORE_PROTOTYPE) && defined(TOUCHHLE_TB_RESTORE_TESTS)
++    /* Exercise the real shortened-limit frontend path without relying on
++     * nondeterministic output-buffer exhaustion. Never raise the limit. */
++    if (th_test_max_insns) {
++        max_insns = MIN(max_insns, th_test_max_insns);
++    }
++#endif
+ #ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
+     archive_eligible = max_insns == MIN(CF_COUNT_MASK, TCG_MAX_INSNS) &&
+                        th_key(cpu, tb, phys_pc, &archive_key, max_insns);

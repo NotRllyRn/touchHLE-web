@@ -1,0 +1,813 @@
+--- a/include/uc_priv.h
++++ b/include/uc_priv.h
+@@ -337,6 +337,13 @@
+     uint8_t *touchhle_read_pointer[2];
+     uint8_t *touchhle_read_pages[1 << 20];
+     bool touchhle_direct_memory;
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++    /* 0 ordinary, 1 recipe pending, 2 sealed, 3 permanently revoked. */
++    unsigned touchhle_seal_state, touchhle_seal_reason;
++    /* Retain executable storage until all suspended callback/TB frames exit. */
++    bool touchhle_tb_flush_pending;
++    uc_hook touchhle_seal_hooks[2];
++#endif
+     // Conservative: once translated, a 4 KiB guest page always uses MMU stores.
+     uint8_t touchhle_code_pages[1 << 17];
+ #endif
+--- a/qemu/accel/tcg/cpu-exec.c
++++ b/qemu/accel/tcg/cpu-exec.c
+@@ -286,6 +286,13 @@
+     if (tb->page_addr[1] != -1) {
+         last_tb = NULL;
+     }
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    /* Callback invalidation can leave live, but unchainable, TB pointers. */
++    if (uc->touchhle_tb_flush_pending ||
++        (last_tb && (last_tb->cflags & CF_INVALID))) {
++        last_tb = NULL;
++    }
++#endif
+     /* See if we can patch the calling TB. */
+     if (last_tb) {
+         tb_exec_unlock(cpu->uc);
+@@ -590,12 +597,25 @@
+         assert_no_pages_locked();
+     }
+ 
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    /* Also reached after siglongjmp: no executor-local TB pointer survives. */
++    touchhle_tb_flush_boundary(cpu);
++#endif
+     /* if an exception is pending, we execute it here */
+     while (!cpu_handle_exception(cpu, &ret)) {
+         TranslationBlock *last_tb = NULL;
+         int tb_exit = 0;
+ 
+-        while (!cpu_handle_interrupt(cpu, &last_tb)) {
++        while (true) {
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++            if (uc->touchhle_tb_flush_pending) {
++                last_tb = NULL;
++                touchhle_tb_flush_boundary(cpu);
++            }
++#endif
++            if (cpu_handle_interrupt(cpu, &last_tb)) {
++                break;
++            }
+             uint32_t cflags = cpu->cflags_next_tb;
+             TranslationBlock *tb;
+ 
+@@ -611,6 +631,13 @@
+             }
+ 
+             tb = tb_find(cpu, last_tb, tb_exit, cflags);
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++            /* A translation/edge callback may have invalidated this TB. */
++            if (tb->cflags & CF_INVALID) {
++                last_tb = NULL;
++                continue;
++            }
++#endif
+             if (unlikely(cpu->exit_request)) {
+                 continue;
+             }
+--- a/qemu/accel/tcg/touchhle-tb-archive.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -49,7 +49,14 @@
+ static THEntry th_work;
+ static THStore th_store;
+ static uint32_t th_limit_records = 16, th_limit_bytes = 1024 * 1024;
++static uint32_t th_limit_wire = TH_MAX_BYTES;
+ static uint64_t th_allocated, th_peak;
++/* Toggle only between emulator calls on the single owner thread. */
++static bool th_capture_active = true;
++void touchhle_tb_archive_capture(unsigned enabled)
++{
++    th_capture_active = enabled != 0;
++}
+ static bool th_store_load(unsigned slot, THEntry *e);
+ static bool th_store_put(THStore *store, THEntry *e);
+ static uint32_t th_store_find(THStore *store, const THKey *key, uint32_t *slot);
+@@ -68,12 +75,108 @@
+ static uint64_t
+     th_stats[5]; /* captures, restores, misses, decodes, rejections */
+ 
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++/* One immutable namespace per module; recreation required to replace it.
++ * Never persist backing/callback/engine pointers. Bounded adapter layout. */
++static uint8_t th_namespace[4096];
++static uint32_t th_namespace_len, th_package_len;
++static uint8_t th_package[2048];
++static void th_descriptor_u64(uint8_t *bytes, unsigned *pos, uint64_t value)
++{
++    for (unsigned n = 0; n < 8; ++n)
++        bytes[(*pos)++] = value >> (n * 8);
++}
++static bool th_identity(const uint8_t *identity, uint32_t length)
++{
++    return identity && th_namespace_len && length == th_package_len &&
++           !memcmp(identity, th_package, length);
++}
++int touchhle_tb_archive_seal_namespace(struct uc_struct *uc,
++                                       const uint8_t *identity, uint32_t length)
++{
++    uint64_t layout[64][2];
++    uint8_t descriptor[4096];
++    const char profile[] = "touchhle-browser-arm-a15-v1:seal1:user-A32-LE:RWX:"
++                           "intr-invalid:no-debug:budget10000";
++    unsigned i, j, pos = sizeof(profile);
++    memcpy(descriptor, profile, sizeof(profile));
++    if (!identity || !length || length > sizeof(th_package) ||
++        !uc->mapped_block_count || uc->mapped_block_count > 64)
++        return 0;
++    /* Only one bound engine at a time. */
++    for (i = 0; i < TH_ENGINE_MAX; ++i)
++        if (th_engines[i].uc)
++            return 0;
++    for (i = 0; i < uc->mapped_block_count; ++i) {
++        MemoryRegion *mr = uc->mapped_blocks[i];
++        uint8_t *ptr = memory_region_get_ram_ptr(mr);
++        uint64_t size = mr->end - mr->addr;
++        if (!mr->ram || !ptr || mr->perms != UC_PROT_ALL || !size ||
++            (mr->addr & 4095) || (size & 4095) || mr->end > (UINT64_C(1) << 32))
++            return 0;
++        for (uint64_t off = 0; off < size; off += 4096)
++            if (uc->touchhle_read_pages[(mr->addr + off) >> 12] != ptr + off)
++                return 0;
++        for (j = 0; j < i; ++j) {
++            MemoryRegion *other = uc->mapped_blocks[j];
++            uintptr_t a = (uintptr_t)ptr,
++                      c = (uintptr_t)memory_region_get_ram_ptr(other);
++            uint64_t n = other->end - other->addr;
++            if (size > UINTPTR_MAX - a || n > UINTPTR_MAX - c ||
++                (a < c + n && c < a + size))
++                return 0;
++        }
++        layout[i][0] = mr->addr;
++        layout[i][1] = size;
++    }
++    th_descriptor_u64(descriptor, &pos, uc->arch);
++    th_descriptor_u64(descriptor, &pos, uc->mode);
++    th_descriptor_u64(descriptor, &pos, uc->cpu_model);
++    th_descriptor_u64(descriptor, &pos,
++                      ((CPUARMState *)uc->cpu->env_ptr)->features);
++    th_descriptor_u64(descriptor, &pos, 1024); /* Unicorn target page */
++    th_descriptor_u64(descriptor, &pos,
++                      4096); /* Direct RAM registration unit */
++    th_descriptor_u64(descriptor, &pos, 0x00f00000);
++    th_descriptor_u64(descriptor, &pos, 0x40000000);
++    th_descriptor_u64(descriptor, &pos, uc->mapped_block_count);
++    for (i = 0; i < uc->mapped_block_count; ++i) {
++        th_descriptor_u64(descriptor, &pos, layout[i][0]);
++        th_descriptor_u64(descriptor, &pos, layout[i][1]);
++        th_descriptor_u64(descriptor, &pos, UC_PROT_ALL);
++    }
++    th_descriptor_u64(descriptor, &pos, length);
++    assert(pos + length <= sizeof(descriptor));
++    memcpy(descriptor + pos, identity, length);
++    pos += length;
++    if (th_namespace_len)
++        return pos == th_namespace_len &&
++               !memcmp(descriptor, th_namespace, pos);
++    /* Refuse to bless records imported/captured before namespace admission. */
++    if (th_store.count)
++        return 0;
++    memcpy(th_namespace, descriptor, pos);
++    th_namespace_len = pos;
++    memcpy(th_package, identity, length);
++    th_package_len = length;
++    return 1;
++}
++#endif
++
+ /* Caller promises immutable identical CPU model/features/configuration for a
+  * nonzero contract. Bind only after engine configuration, unbind before close.
+  * Single emulation thread, no reentrant compilation. Does not enable adapter.
+  */
+ int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract)
+ {
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++    if (contract && (contract != 1 || uc->touchhle_seal_state != 2))
++        return 0;
++    if (contract)
++        for (unsigned n = 0; n < TH_ENGINE_MAX; ++n)
++            if (th_engines[n].uc && th_engines[n].uc != uc)
++                return 0;
++#endif
+     unsigned i;
+     for (i = 0; i < TH_ENGINE_MAX; ++i) {
+         if (th_engines[i].uc == uc) {
+@@ -172,6 +275,17 @@
+     struct uc_struct *uc = cpu->uc;
+     CPUARMState *env = cpu->env_ptr;
+     unsigned i;
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++    if (uc->touchhle_seal_state != 2 ||
++        (env->uncached_cpsr & CPSR_M) != ARM_CPU_MODE_USR)
++        return false;
++#endif
++    /* Both ISAs require A32 non-M and little-endian code/data. */
++    if (arm_feature(env, ARM_FEATURE_M) || (uc->mode & UC_MODE_BIG_ENDIAN) ||
++        FIELD_EX32(tb->flags, TBFLAG_ANY, AARCH64_STATE) ||
++        FIELD_EX32(tb->flags, TBFLAG_ANY, BE_DATA) ||
++        FIELD_EX32(tb->flags, TBFLAG_A32, SCTLR_B))
++        return false;
+     memset(k, 0, sizeof(*k));
+     for (i = 0; i < TH_ENGINE_MAX; ++i) {
+         if (th_engines[i].uc == uc) {
+@@ -214,6 +328,11 @@
+                                       i <= UC_HOOK_MEM_FETCH_PROT_IDX);
+         for (item = uc->hook[i].head; item; item = item->next) {
+             struct hook *h = item->data;
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++            if (h->to_delete || ((uc_hook)h != uc->touchhle_seal_hooks[0] &&
++                                 (uc_hook)h != uc->touchhle_seal_hooks[1]))
++                return false;
++#endif
+             if (!runtime || (h->type & ~(UC_HOOK_INTR | UC_HOOK_MEM_INVALID))) {
+                 return false;
+             }
+@@ -694,6 +813,7 @@
+     TCGContext *s = cpu->uc->tcg_ctx;
+     THEntry *e = &th_work;
+     unsigned i;
++    if (!th_capture_active) return;
+     if (cpu->uc->invalid_error || s->ptr_capture_rejected || code_size <= 0 ||
+         code_size > TH_CODE_MAX || search_size <= 0 ||
+         search_size > TH_SEARCH_MAX || !tb->size || tb->size > 4096 ||
+--- a/qemu/accel/tcg/touchhle-tb-codec.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-codec.inc.c
+@@ -164,6 +164,11 @@
+                                     uint32_t identity_len, uint8_t *output,
+                                     uint32_t capacity)
+ {
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++    if (!th_identity(identity, identity_len)) return 0;
++    identity = th_namespace;
++    identity_len = th_namespace_len;
++#endif
+     uint32_t i, count = th_store.count, total;
+     THWire w;
+     if (!identity || !identity_len || identity_len > TH_ID_MAX ||
+@@ -193,6 +198,11 @@
+ int touchhle_tb_archive_import(const uint8_t *identity, uint32_t identity_len,
+                                const uint8_t *input, uint32_t length)
+ {
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++    if (!th_identity(identity, identity_len)) return 0;
++    identity = th_namespace;
++    identity_len = th_namespace_len;
++#endif
+     THStore pending = {0};
+     THWire w = {.in = input, .len = length, .ok = true};
+     uint32_t i, count = 0;
+--- a/qemu/accel/tcg/touchhle-tb-store.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-store.inc.c
+@@ -141,6 +141,14 @@
+     th_limit_bytes = bytes;
+     return 1;
+ }
++/* Payload limit excludes the caller-reserved wire header/namespace space. */
++int touchhle_tb_archive_wire_limit(uint32_t bytes)
++{
++    if (!bytes || bytes > TH_MAX_BYTES || th_store.count)
++        return 0;
++    th_limit_wire = bytes;
++    return 1;
++}
+ static bool th_store_put(THStore *store, THEntry *e)
+ {
+     static uint8_t encoded[TH_RECORD_MAX];
+@@ -161,6 +169,12 @@
+             return true;
+         }
+     } else if (store->count == th_limit_records) {
++        ++store->quota;
++        return false;
++    }
++    /* Check before allocation/replacement so a full archive remains exportable.
++     * The old record's complete size is credited for replacement. */
++    if ((uint64_t)store->wire - (old ? old->size : 0) + w.pos > th_limit_wire) {
+         ++store->quota;
+         return false;
+     }
+--- a/qemu/accel/tcg/translate-all.c
++++ b/qemu/accel/tcg/translate-all.c
+@@ -1387,9 +1387,78 @@
+     mmap_unlock();
+ }
+ 
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++static gboolean touchhle_tb_revoke_iter(gpointer key, gpointer value,
++                                        gpointer data)
++{
++    TranslationBlock *tb = value;
++    TCGContext *tcg_ctx = data;
++
++    /* Invalidation leaves the host-PC tree and executable storage intact:
++     * handled faults can finish, and longjmp can still restore guest state.
++     * It removes lookup entries and patches incoming/outgoing links now.
++     * The traversal tree itself is not changed by tb_phys_invalidate. */
++    if (!(tb->cflags & CF_INVALID)) {
++        tb_phys_invalidate(tcg_ctx, tb, -1);
++    }
++    return false;
++}
++
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++/* Exercise the real allocator-failure path without filling the code buffer. */
++UNICORN_EXPORT void touchhle_tb_callback_test_exhaust(struct uc_struct *uc)
++{
++    uc->tcg_ctx->region.current = uc->tcg_ctx->region.n;
++    uc->tcg_ctx->code_gen_highwater = uc->tcg_ctx->code_gen_ptr;
++}
++
++UNICORN_EXPORT uint64_t touchhle_tb_callback_test_stat(struct uc_struct *uc,
++                                                       unsigned index)
++{
++    switch (index) {
++    case 0:
++        return uc->tcg_ctx->tb_ctx.tb_flush_count;
++    case 1:
++        return uc->touchhle_tb_flush_pending;
++    case 2:
++        return uc->touchhle_direct_memory;
++    default:
++        return UINT64_MAX;
++    }
++}
++#endif
++
++void touchhle_tb_flush_boundary(CPUState *cpu)
++{
++    /* A nested executor still has an outer TB/callback frame suspended. */
++    if (cpu->uc->touchhle_tb_flush_pending && cpu->uc->nested_level == 1) {
++        bool locked = tb_exec_is_locked(cpu->uc);
++        cpu->uc->last_tb = NULL;
++        cpu->uc->touchhle_tb_flush_pending = false;
++        tb_exec_unlock(cpu->uc);
++        do_tb_flush(
++            cpu, RUN_ON_CPU_HOST_INT(cpu->uc->tcg_ctx->tb_ctx.tb_flush_count));
++        tb_exec_change(cpu->uc, locked);
++    }
++}
++#endif
++
+ void tb_flush(CPUState *cpu)
+ {
+     unsigned tb_flush_count = cpu->uc->tcg_ctx->tb_ctx.tb_flush_count;
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    if (cpu->uc->touchhle_seal_state == 3 && cpu->uc->nested_level > 0) {
++        cpu->uc->touchhle_tb_flush_pending = true;
++        mmap_lock();
++        tcg_tb_foreach(cpu->uc->tcg_ctx, touchhle_tb_revoke_iter,
++                       cpu->uc->tcg_ctx);
++        mmap_unlock();
++        cpu->uc->last_tb = NULL;
++        return;
++    }
++    cpu->uc->touchhle_tb_flush_pending = false;
++    cpu->uc->last_tb = NULL;
++#endif
+     do_tb_flush(cpu, RUN_ON_CPU_HOST_INT(tb_flush_count));
+ }
+ 
+@@ -1747,6 +1816,13 @@
+     if (unlikely(!tb)) {
+         /* flush must be done */
+         tb_flush(cpu);
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++        /* A nested executor cannot reclaim the suspended outer TB. Report
++         * exhaustion instead of retrying the same deferred flush forever. */
++        if (cpu->uc->touchhle_tb_flush_pending && cpu->uc->nested_level > 1) {
++            cpu->uc->invalid_error = UC_ERR_RESOURCE;
++        }
++#endif
+         mmap_unlock();
+         /* Make the execution loop process the flush as soon as possible.  */
+         cpu->exception_index = EXCP_INTERRUPT;
+@@ -1773,7 +1849,7 @@
+ #ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
+     archive_eligible = max_insns == MIN(CF_COUNT_MASK, TCG_MAX_INSNS) &&
+                        th_key(cpu, tb, phys_pc, &archive_key, max_insns);
+-    tcg_ctx->ptr_capture_enabled = archive_eligible;
++    tcg_ctx->ptr_capture_enabled = archive_eligible && th_capture_active;
+     if (archive_eligible && th_restore(cpu, tb, &archive_key,
+                                        &gen_code_size, &search_size)) {
+         goto archive_publish;
+--- a/qemu/include/exec/exec-all.h
++++ b/qemu/include/exec/exec-all.h
+@@ -383,6 +383,10 @@
+ /* TranslationBlock invalidate API */
+ void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr, MemTxAttrs attrs);
+ void tb_flush(CPUState *cpu);
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++/* Only call outside generated execution and with no live local TB pointers. */
++void touchhle_tb_flush_boundary(CPUState *cpu);
++#endif
+ void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, tb_page_addr_t page_addr);
+ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
+                                    target_ulong cs_base, uint32_t flags,
+--- a/qemu/include/tcg/touchhle-tb-archive.h
++++ b/qemu/include/tcg/touchhle-tb-archive.h
+@@ -9,12 +9,28 @@
+  * persistence. */
+ int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract);
+ void touchhle_tb_archive_clear(void);
++/* Single owner thread outside execution. Disabling capture preserves existing
++ * records for restore and avoids opaque pointer lowering on fallback decodes. */
++void touchhle_tb_archive_capture(unsigned enabled);
++#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
++int touchhle_tb_archive_seal_namespace(struct uc_struct *uc,
++    const uint8_t *identity, uint32_t length);
++#endif
++/* With seal enabled, raw bind admits only the constructor-proven sealed engine,
++ * with contract1. Import/export accept the 1..2048-byte package identity used
++ * at seal; wire identity includes the native-owned profile and mapped layout.
++ * Seal must precede import, and package identity must be verified by the caller.
++ * Namespace is immutable for the module lifetime, including clear/close.
++ * Without seal enabled the experimental caller-config contract below applies. */
+ /* Configure while archive is empty. 1..524288 records, at most256MiB resident
+  * storage; wire import also has a256MiB bound. Clear releases all storage but
+  * preserves configured limits. Capture stops with explicit omissions at quota.
+  * Staging peak is bounded at512MiB excluding caller input/output and scratch.
+  */
+ int touchhle_tb_archive_limits(uint32_t records, uint32_t bytes);
++/* Empty archive only; caller reserves header/namespace bytes separately.
++ * Preserved across clear. Capture/import storage enforce this payload quota. */
++int touchhle_tb_archive_wire_limit(uint32_t bytes);
+ /* Explicit runtime/configuration descriptor, 1..4096 bytes, compared exactly.
+  * Caller binds configured CPUs separately and promises immutable configuration.
+  * Descriptor MUST identify exact runtime/helper/opcode ABI and config, not just
+--- a/qemu/target/arm/helper.c
++++ b/qemu/target/arm/helper.c
+@@ -11883,6 +11883,31 @@
+         FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1, flags);
+     }
+ 
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    if (env->uc->touchhle_seal_state == 2 &&
++        (arm_feature(env, ARM_FEATURE_M) ||
++         (env->uncached_cpsr & CPSR_M) != ARM_CPU_MODE_USR ||
++         FIELD_EX32(flags, TBFLAG_ANY, AARCH64_STATE) ||
++         FIELD_EX32(flags, TBFLAG_ANY, BE_DATA) ||
++         FIELD_EX32(flags, TBFLAG_A32, SCTLR_B) ||
++         FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) ||
++         FIELD_EX32(flags, TBFLAG_ANY, PSTATE_SS))) {
++        /* Guest SETEND may leave the profile between uc_emu_start calls.
++         * Never flush here: state extraction also runs during invalidation.
++         * Live TBs keep full state keys; all future archive admission stops. */
++        env->uc->touchhle_seal_state = 3;
++        env->uc->touchhle_seal_reason = 2;
++        /* State extraction can run during invalidation: request only. */
++        env->uc->touchhle_tb_flush_pending = true;
++        env->uc->touchhle_direct_memory = false;
++        memset(env->uc->touchhle_read_size, 0,
++               sizeof(env->uc->touchhle_read_size));
++        memset(env->uc->touchhle_read_pages, 0,
++               sizeof(env->uc->touchhle_read_pages));
++        extern int touchhle_tb_archive_bind(struct uc_struct *, uint64_t);
++        touchhle_tb_archive_bind(env->uc, 0);
++    }
++#endif
+     *pflags = flags;
+ }
+ 
+--- a/uc.c
++++ b/uc.c
+@@ -111,12 +111,83 @@
+     }
+ }
+ 
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++#ifndef TOUCHHLE_TB_RESTORE_PROTOTYPE
++#error The compatibility seal requires the archive prototype
++#endif
++#include "qemu/include/tcg/touchhle-tb-archive.h"
++/* Reasons are bounded first-departure diagnostics, never caller credentials. */
++static void th_revoke(uc_engine *uc, unsigned reason)
++{
++    if (uc->touchhle_seal_state == 1 || uc->touchhle_seal_state == 2) {
++        uc->touchhle_seal_state = 3;
++        uc->touchhle_seal_reason = reason;
++        touchhle_tb_archive_bind(uc, 0);
++        uc->touchhle_direct_memory = false;
++        memset(uc->touchhle_read_size, 0, sizeof(uc->touchhle_read_size));
++        memset(uc->touchhle_read_pages, 0, sizeof(uc->touchhle_read_pages));
++        /* Invalidate/unlink immediately; tb_flush defers storage reclamation
++         * while uc_emu_start (including a suspended outer callback) is live. */
++        if (uc->init_done)
++            uc->tb_flush(uc);
++    }
++}
++static void th_reg_mutation(uc_engine *uc, int reg, const void *value,
++                            size_t size)
++{
++    bool ordinary = (reg >= UC_ARM_REG_R0 && reg <= UC_ARM_REG_R12) ||
++                    reg == UC_ARM_REG_SP || reg == UC_ARM_REG_LR ||
++                    reg == UC_ARM_REG_PC ||
++                    (reg >= UC_ARM_REG_D0 && reg <= UC_ARM_REG_D31) ||
++                    reg == UC_ARM_REG_FPSCR || reg == UC_ARM_REG_CPSR;
++    if (!ordinary)
++        th_revoke(uc, 1);
++    if (reg == UC_ARM_REG_CPSR && size >= 4) {
++        uint32_t cpsr;
++        memcpy(&cpsr, value, 4);
++        /* User, LE data, no architectural single step/Jazelle. T/IT/NZCV
++         * and all ordinary guest context values are deliberately unfrozen. */
++        if ((cpsr & (0x1f | (1u << 9) | (1u << 21) | (1u << 24))) != 0x10)
++            th_revoke(uc, 2);
++    }
++}
++#define TH_MUTATE(uc, reason) th_revoke(uc, reason)
++#else
++#define TH_MUTATE(uc, reason) ((void)0)
++#define th_reg_mutation(uc, reg, value, size) ((void)0)
++#endif
++
+ #ifdef __EMSCRIPTEN__
+ // Caller guarantees immutable mapping/permissions, identity ARM addresses,
+ // no physical aliases, and no valid-memory hooks for the engine lifetime.
+ UNICORN_EXPORT void touchHLE_uc_read_region(uc_engine *uc, uint32_t base,
+                                            uint32_t size, void *pointer)
+ {
++#if defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    if (uc->touchhle_seal_state == 3)
++        return;
++    if (uc->touchhle_seal_state == 2) {
++        th_revoke(uc, 3);
++        return;
++    }
++    if (uc->touchhle_seal_state == 1) {
++        MemoryRegion *mr = uc->memory_mapping(uc, base);
++        if (!size || (base & 4095) || (size & 4095) || !pointer ||
++            (uint64_t)base + size > (UINT64_C(1) << 32) || !mr ||
++            mr->addr != base || mr->end != (uint64_t)base + size ||
++            mr->perms != UC_PROT_ALL || !mr->ram ||
++            (!mr->ram_block || mr->ram_block->host != pointer)) {
++            th_revoke(uc, 3);
++            return;
++        }
++        for (uint32_t off = 0; off < size; off += 4096)
++            if (uc->touchhle_read_pages[(base + off) >> 12]) {
++                th_revoke(uc, 3);
++                return;
++            }
++    }
++#endif
++
+     // Page lookup covers every immutable adapter mapping, including dylibs.
+     if (size && !(base & 4095) && !(size & 4095) &&
+         (uint64_t)base + size <= (UINT64_C(1) << 32)) {
+@@ -521,6 +592,10 @@
+ UNICORN_EXPORT
+ uc_err uc_close(uc_engine *uc)
+ {
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++    extern int touchhle_tb_archive_bind(uc_engine *, uint64_t);
++    touchhle_tb_archive_bind(uc, 0);
++#endif
+     int i;
+     MemoryRegion *mr;
+ 
+@@ -627,6 +702,8 @@
+ uc_err uc_reg_write_batch(uc_engine *uc, int const *regs, void *const *vals,
+                           int count)
+ {
++    for (int j = 0; j < count; ++j)
++        th_reg_mutation(uc, regs[j], vals[j], (size_t)-1);
+     UC_INIT(uc);
+     reg_write_t reg_write = uc->reg_write;
+     void *env = uc->cpu->env_ptr;
+@@ -682,6 +759,8 @@
+ uc_err uc_reg_write_batch2(uc_engine *uc, int const *regs,
+                            const void *const *vals, size_t *sizes, int count)
+ {
++    for (int j = 0; j < count; ++j)
++        th_reg_mutation(uc, regs[j], vals[j], sizes[j]);
+     UC_INIT(uc);
+     reg_write_t reg_write = uc->reg_write;
+     void *env = uc->cpu->env_ptr;
+@@ -721,6 +800,7 @@
+ UNICORN_EXPORT
+ uc_err uc_reg_write(uc_engine *uc, int regid, const void *value)
+ {
++    th_reg_mutation(uc, regid, value, (size_t)-1);
+     UC_INIT(uc);
+     int setpc = 0;
+     size_t size = (size_t)-1;
+@@ -753,6 +833,7 @@
+ UNICORN_EXPORT
+ uc_err uc_reg_write2(uc_engine *uc, int regid, const void *value, size_t *size)
+ {
++    th_reg_mutation(uc, regid, value, *size);
+     UC_INIT(uc);
+     int setpc = 0;
+     uc_err err =
+@@ -1108,6 +1189,20 @@
+ uc_err uc_emu_start(uc_engine *uc, uint64_t begin, uint64_t until,
+                     uint64_t timeout, size_t count)
+ {
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    if (uc->touchhle_seal_state == 1)
++        th_revoke(uc, 7);
++    if (uc->touchhle_seal_state == 2) {
++        uint32_t cpsr = 0;
++        uc_reg_read(uc, UC_ARM_REG_CPSR, &cpsr);
++        th_reg_mutation(uc, UC_ARM_REG_CPSR, &cpsr, sizeof(cpsr));
++        if (until || timeout || count || uc->nested_level ||
++            !uc->touchhle_budget_adapter || !uc->touchhle_budget_active ||
++            uc->touchhle_budget < 1 || uc->touchhle_budget > 10000)
++            th_revoke(uc, 7);
++    }
++#endif
++
+     uc_err err;
+ 
+     // reset the counter
+@@ -1265,6 +1360,12 @@
+     // or we may lost uc_emu_stop
+     if (uc->nested_level == 0) {
+         uc->emulation_done = true;
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++        /* Also drain stop/error/longjmp paths that bypass the next TB lookup.
++         */
++        if (uc->touchhle_tb_flush_pending)
++            uc->tb_flush(uc);
++#endif
+ 
+         // remove hooks to delete
+         // make sure we delete all hooks at the first level.
+@@ -1422,6 +1523,7 @@
+ uc_err uc_mem_map(uc_engine *uc, uint64_t address, uint64_t size,
+                   uint32_t perms)
+ {
++    TH_MUTATE(uc, 3);
+     uc_err res;
+ 
+     UC_INIT(uc);
+@@ -1441,6 +1543,11 @@
+ uc_err uc_mem_map_ptr(uc_engine *uc, uint64_t address, uint64_t size,
+                       uint32_t perms, void *ptr)
+ {
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++    if (uc->touchhle_seal_state == 2 || perms != UC_PROT_ALL)
++        th_revoke(uc, 3);
++#endif
++
+     uc_err res;
+ 
+     UC_INIT(uc);
+@@ -1466,6 +1573,7 @@
+                    uc_cb_mmio_read_t read_cb, void *user_data_read,
+                    uc_cb_mmio_write_t write_cb, void *user_data_write)
+ {
++    TH_MUTATE(uc, 3);
+     uc_err res;
+ 
+     UC_INIT(uc);
+@@ -1745,6 +1853,7 @@
+ uc_err uc_mem_protect(struct uc_struct *uc, uint64_t address, uint64_t size,
+                       uint32_t perms)
+ {
++    TH_MUTATE(uc, 3);
+     MemoryRegion *mr;
+     uint64_t addr = address;
+     uint64_t pc;
+@@ -1867,6 +1976,7 @@
+ UNICORN_EXPORT
+ uc_err uc_mem_unmap(struct uc_struct *uc, uint64_t address, uint64_t size)
+ {
++    TH_MUTATE(uc, 3);
+     MemoryRegion *mr;
+     uint64_t addr;
+     uint64_t count, len;
+@@ -1940,6 +2050,7 @@
+ uc_err uc_hook_add(uc_engine *uc, uc_hook *hh, int type, void *callback,
+                    void *user_data, uint64_t begin, uint64_t end, ...)
+ {
++    TH_MUTATE(uc, 4);
+     int ret = UC_ERR_OK;
+     int i = 0;
+ 
+@@ -2067,6 +2178,7 @@
+ UNICORN_EXPORT
+ uc_err uc_hook_del(uc_engine *uc, uc_hook hh)
+ {
++    TH_MUTATE(uc, 4);
+     int i;
+     struct hook *hook = (struct hook *)hh;
+ 
+@@ -2592,6 +2704,7 @@
+ UNICORN_EXPORT
+ uc_err uc_context_restore(uc_engine *uc, uc_context *context)
+ {
++    TH_MUTATE(uc, 5);
+     UC_INIT(uc);
+     uc_err ret;
+ 
+@@ -2661,6 +2774,11 @@
+     // MSVC Would do signed shift on signed integers.
+     rw = (uint32_t)control >> 30;
+     type = (control & ((1 << 16) - 1));
++    if (rw != UC_CTL_IO_READ && type != UC_CTL_TB_REMOVE_CACHE &&
++        type != UC_CTL_TB_FLUSH && type != UC_CTL_TLB_FLUSH)
++        TH_MUTATE(uc, 6);
++    if (type == UC_CTL_TB_REQUEST_CACHE)
++        TH_MUTATE(uc, 6);
+     va_start(args, control);
+ 
+     switch (type) {
+@@ -3104,6 +3222,8 @@
+ #ifdef __EMSCRIPTEN__
+ UNICORN_EXPORT void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining)
+ {
++    if (remaining < 1 || remaining > 10000)
++        TH_MUTATE(uc, 7);
+     uc->touchhle_budget_adapter = true;
+     uc->touchhle_budget_active = remaining >= 0;
+     uc->touchhle_budget = remaining;
+@@ -3114,3 +3234,83 @@
+ }
+ #endif
+ 
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++/* Integration-private: creates the engine itself, never blesses an existing
++ * arbitrary engine. Callback addresses are runtime data, not persisted IDs. */
++UNICORN_EXPORT uc_err touchHLE_uc_archive_new(uc_engine **out, void *intr,
++                                              void *invalid, void *user)
++{
++    uc_engine *uc = NULL;
++    uint32_t cpacr = 0x00f00000, fpexc = 0x40000000;
++    uc_err err = uc_open(UC_ARCH_ARM, UC_MODE_ARM, &uc);
++    if (err)
++        return err;
++    err = uc_ctl_set_cpu_model(uc, UC_CPU_ARM_CORTEX_A15);
++    if (!err)
++        err = uc_reg_write(uc, UC_ARM_REG_C1_C0_2, &cpacr);
++    if (!err)
++        err = uc_reg_write(uc, UC_ARM_REG_FPEXC, &fpexc);
++    if (!err)
++        err = uc_hook_add(uc, &uc->touchhle_seal_hooks[0], UC_HOOK_INTR, intr,
++                          user, 1, 0);
++    if (!err)
++        err = uc_hook_add(uc, &uc->touchhle_seal_hooks[1], UC_HOOK_MEM_INVALID,
++                          invalid, user, 1, 0);
++    if (err) {
++        uc_close(uc);
++        return err;
++    }
++    uc->touchhle_seal_state = 1;
++    *out = uc;
++    return UC_ERR_OK;
++}
++UNICORN_EXPORT unsigned touchHLE_uc_archive_state(uc_engine *uc)
++{
++    return uc->touchhle_seal_state;
++}
++UNICORN_EXPORT unsigned touchHLE_uc_archive_reason(uc_engine *uc)
++{
++    return uc->touchhle_seal_reason;
++}
++#endif
++
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
++/* Identity is a package-layer exact byte descriptor, NOT verified hashes here.
++ * Call only after final mappings, context sync and positive budget setup. */
++UNICORN_EXPORT int touchHLE_uc_archive_seal(uc_engine *uc,
++                                            const uint8_t *identity,
++                                            uint32_t length)
++{
++    uint32_t cpsr = 0;
++    if (uc->touchhle_seal_state != 1)
++        return 0;
++    uc_reg_read(uc, UC_ARM_REG_CPSR, &cpsr);
++    th_reg_mutation(uc, UC_ARM_REG_CPSR, &cpsr, sizeof(cpsr));
++    /* Rebuild ARM hflags after CPACR/FPEXC initialization. */
++    uc_reg_write(uc, UC_ARM_REG_CPSR, &cpsr);
++    if (uc->touchhle_seal_state != 1 || uc->arch != UC_ARCH_ARM ||
++        uc->mode != UC_MODE_ARM || uc->cpu_model != UC_CPU_ARM_CORTEX_A15 ||
++        uc->target_page_size != 1024 || !uc->touchhle_direct_memory ||
++        !uc->touchhle_budget_active || !uc->touchhle_budget_adapter ||
++        uc->touchhle_budget < 1 || uc->touchhle_budget > 10000 ||
++        !touchhle_tb_archive_seal_namespace(uc, identity, length)) {
++        th_revoke(uc, 8);
++        return 0;
++    }
++    uc->touchhle_seal_state = 2;
++    if (!touchhle_tb_archive_bind(uc, 1)) {
++        th_revoke(uc, 8);
++        return 0;
++    }
++    return 1;
++}
++#endif
++
++#if defined(__EMSCRIPTEN__) && defined(TOUCHHLE_TB_SEAL_PROTOTYPE) &&          \
++    defined(TOUCHHLE_TB_RESTORE_TESTS)
++/* Fixture-only observation; no configuration authority. */
++UNICORN_EXPORT uc_hook touchHLE_uc_archive_test_hook(uc_engine *uc, unsigned n)
++{
++    return n < 2 ? uc->touchhle_seal_hooks[n] : 0;
++}
++#endif

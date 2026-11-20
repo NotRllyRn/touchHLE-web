@@ -10,6 +10,8 @@ use crate::objc::{id, msg, nil, objc_classes, ClassExports};
 #[derive(Default)]
 pub struct State {
     pub(crate) first_responder: id,
+    #[cfg(target_os = "emscripten")]
+    pub(crate) web_text: super::ui_view::ui_control::ui_text_field::web_input::State,
 }
 
 pub const CLASSES: ClassExports = objc_classes! {

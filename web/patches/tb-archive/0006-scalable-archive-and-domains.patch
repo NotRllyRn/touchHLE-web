@@ -1,0 +1,892 @@
+--- a/qemu/accel/tcg/touchhle-tb-archive.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -8,7 +8,6 @@
+ 
+ #include "tcg/touchhle-tb-archive.h"
+ 
+-#define TH_ARCHIVE_SLOTS 16
+ #define TH_CODE_MAX 16384
+ #define TH_SEARCH_MAX 8192
+ #define TH_ENGINE_MAX 8
+@@ -28,23 +27,40 @@
+     TCGPtrReloc ptrs[TCG_PTR_RELOC_MAX];
+     uint8_t guest[4096], code[TH_CODE_MAX], search[TH_SEARCH_MAX];
+ } THEntry;
+-/* Accidental-corruption seal, not an untrusted-file authentication scheme. */
+-static uint64_t th_seal(const THEntry *e)
+-{
+-    const uint8_t *p = (const uint8_t *)e;
+-    uint64_t h = UINT64_C(14695981039346656037);
+-    unsigned i;
+-    for (i = 0; i < sizeof(*e); ++i) {
+-        uint8_t b = (i >= offsetof(THEntry, seal) &&
+-                     i < offsetof(THEntry, seal) + sizeof(e->seal))
+-                        ? 0
+-                        : p[i];
+-        h = (h ^ b) * UINT64_C(1099511628211);
+-    }
+-    return h;
+-}
+-static THEntry th_entries[TH_ARCHIVE_SLOTS], th_work;
+-static unsigned th_used, th_next;
++/* Variable payloads and a bounded open-addressed index; no entry deletion.
++ * The small default preserves fixture behavior. A game capture must opt into
++ * larger quotas explicitly. Index slots hold stable insertion indices + 1. */
++#define TH_MAX_RECORDS 524288u
++#define TH_MAX_BYTES (256u * 1024u * 1024u)
++#define TH_RECORD_MAX                                                          \
++    (96u + 8u * TCG_PTR_RELOC_MAX + 4096u + TH_CODE_MAX + TH_SEARCH_MAX)
++typedef struct THPacked {
++    THKey key;
++    uint64_t seal;
++    uint32_t size, hash;
++    uint8_t bytes[];
++} THPacked;
++typedef struct THStore {
++    THPacked **entries;
++    uint32_t *index;
++    uint32_t count, mask, resident, wire;
++    uint64_t probes, dedup, replaced, quota, oom;
++} THStore;
++static THEntry th_work;
++static THStore th_store;
++static uint32_t th_limit_records = 16, th_limit_bytes = 1024 * 1024;
++static uint64_t th_allocated, th_peak;
++static bool th_store_load(unsigned slot, THEntry *e);
++static bool th_store_put(THStore *store, THEntry *e);
++static uint32_t th_store_find(THStore *store, const THKey *key, uint32_t *slot);
++static void th_store_destroy(THStore *store);
++static uint64_t th_bytes_seal(const uint8_t *p, uint32_t size)
++{
++    uint64_t hash = UINT64_C(14695981039346656037);
++    while (size--)
++        hash = (hash ^ *p++) * UINT64_C(1099511628211);
++    return hash;
++}
+ static struct {
+     struct uc_struct *uc;
+     uint64_t contract;
+@@ -82,47 +98,67 @@
+ }
+ void touchhle_tb_archive_clear(void)
+ {
+-    memset(th_entries, 0, sizeof(th_entries));
++    th_store_destroy(&th_store);
++    th_peak = th_allocated;
+     memset(th_stats, 0, sizeof(th_stats));
+-    th_used = th_next = 0;
+ }
+ uint64_t touchhle_tb_archive_stat(unsigned n)
+ {
+-    return n < ARRAY_SIZE(th_stats) ? th_stats[n] : 0;
++    switch (n) {
++    case 5:
++        return th_store.count;
++    case 6:
++        return th_store.wire;
++    case 7:
++        return th_store.resident;
++    case 8:
++        return th_store.quota;
++    case 9:
++        return th_store.oom;
++    case 10:
++        return th_store.dedup;
++    case 11:
++        return th_store.replaced;
++    case 12:
++        return th_store.probes;
++    case 13:
++        return th_peak;
++    case 14:
++        return th_allocated;
++    default:
++        return n < ARRAY_SIZE(th_stats) ? th_stats[n] : 0;
++    }
+ }
+ /* Test seam: corrupt bounded archive bytes, never live TBs. */
+ int touchhle_tb_archive_mutate(unsigned slot, unsigned section, unsigned offset,
+                                uint8_t xor_mask)
+ {
+-    THEntry *e;
+-    uint8_t *p;
+-    unsigned n;
+-    if (slot >= th_used) {
++    THEntry *e = &th_work;
++    uint32_t at, size;
++    if (!th_store_load(slot, e))
+         return 0;
+-    }
+-    e = &th_entries[slot];
++    at = 96 + 8 * e->ptr_count;
+     switch (section) {
+     case 0:
+-        p = e->guest;
+-        n = e->size;
++        size = e->size;
+         break;
+     case 1:
+-        p = e->code;
+-        n = e->code_size;
++        at += e->size;
++        size = e->code_size;
+         break;
+     case 2:
+-        p = e->search;
+-        n = e->search_size;
++        at += e->size + e->code_size;
++        size = e->search_size;
+         break;
+     default:
+         return 0;
+     }
+-    if (offset >= n) {
++    if (offset >= size)
+         return 0;
+-    }
+-    p[offset] ^= xor_mask;
+-    return 1;
+-}
++    th_store.entries[slot]->bytes[at + offset] ^= xor_mask;
++    return 1; /* Deliberately leave the seal stale. */
++}
++
+ static uint32_t th_u32(const uint8_t *p)
+ {
+     uint32_t x;
+@@ -330,6 +366,58 @@
+     *pos += 4;
+     return true;
+ }
++/* Match compare32/compare64, which do not implement NEVER or ALWAYS. */
++static bool th_cond(unsigned cond)
++{
++    switch (cond) {
++    case TCG_COND_EQ:
++    case TCG_COND_NE:
++    case TCG_COND_LT:
++    case TCG_COND_GE:
++    case TCG_COND_LE:
++    case TCG_COND_GT:
++    case TCG_COND_LTU:
++    case TCG_COND_GEU:
++    case TCG_COND_LEU:
++    case TCG_COND_GTU:
++        return true;
++    default:
++        return false;
++    }
++}
++/* Match the pinned tci.c switches, including their ignored store sign bit.
++ * All MO_AMASK encodings are supported by get_alignment_bits. */
++static bool th_memop(unsigned op, uint32_t oi)
++{
++    unsigned mo = get_memop(oi), kind;
++    bool load = op == INDEX_op_qemu_ld_i32 || op == INDEX_op_qemu_ld_i64;
++    bool wide = op == INDEX_op_qemu_ld_i64 || op == INDEX_op_qemu_st_i64;
++    if (get_mmuidx(oi) >= NB_MMU_MODES ||
++        (mo & ~(MO_AMASK | MO_BSWAP | MO_SSIZE))) {
++        return false;
++    }
++    kind = mo & (MO_BSWAP | (load ? MO_SSIZE : MO_SIZE));
++    switch (kind) {
++    case MO_UB:
++    case MO_LEUW:
++    case MO_BEUW:
++    case MO_LEUL:
++    case MO_BEUL:
++        return true;
++    case MO_SB:
++    case MO_LESW:
++    case MO_BESW:
++        return load;
++    case MO_LESL:
++    case MO_BESL:
++        return load && wide;
++    case MO_LEQ:
++    case MO_BEQ:
++        return wide;
++    default:
++        return false;
++    }
++}
+ /* capture=true: live -> canonical. false: canonical -> current live addresses.
+  * Only scratch is changed until ALL bounds/relocations/search checks succeed.
+  */
+@@ -410,24 +498,25 @@
+             break;
+         case INDEX_op_setcond_i32:
+             ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
+-                 th_ri(e->code, &pos, end) && end - pos == 1;
+-            ++pos; /* Numeric condition, emitted by this exact runtime. */
++                 th_ri(e->code, &pos, end) && end - pos == 1 &&
++                 th_cond(e->code[pos]);
++            ++pos;
+             break;
+         case INDEX_op_brcond2_i32:
+             ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
+                  th_ri(e->code, &pos, end) && th_ri(e->code, &pos, end);
+-            if (!ok || pos == end) {
++            if (!ok || pos == end || !th_cond(e->code[pos])) {
+                 return false;
+             }
+             ++pos;
+             goto branch_label;
+         case INDEX_op_brcond_i32:
+             ok = th_reg(e->code, &pos, end) && th_ri(e->code, &pos, end);
+-            if (!ok || pos == end) {
+-                return false;
+-            }
+-            ++pos; /* TCGCond is from this exact encoder. */
+-                   /* fall through */
++            if (!ok || pos == end || !th_cond(e->code[pos])) {
++                return false;
++            }
++            ++pos;
++            /* fall through */
+         case INDEX_op_br:
+         branch_label:
+             if (end - pos != 4 || label_count == ARRAY_SIZE(labels)) {
+@@ -491,13 +580,14 @@
+         case INDEX_op_qemu_ld_i32:
+         case INDEX_op_qemu_st_i32:
+             ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
+-                 end - pos == 4;
+-            pos += 4; /* numeric MemOpIdx */
++                 end - pos == 4 && th_memop(op, th_u32(e->code + pos));
++            pos += 4;
+             break;
+         case INDEX_op_qemu_ld_i64:
+         case INDEX_op_qemu_st_i64:
+             ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
+-                 th_reg(e->code, &pos, end) && end - pos == 4;
++                 th_reg(e->code, &pos, end) && end - pos == 4 &&
++                 th_memop(op, th_u32(e->code + pos));
+             pos += 4;
+             break;
+         case INDEX_op_mb:
+@@ -560,14 +650,15 @@
+                        int *code_size, int *search_size)
+ {
+     TCGContext *s = cpu->uc->tcg_ctx;
+-    unsigned i;
+-    for (i = 0; i < th_used; ++i) {
+-        THEntry *e = &th_entries[i];
+-        if (memcmp(&e->key, key, sizeof(*key))) {
+-            continue;
+-        }
+-        th_work = *e;
+-        if (e->seal != th_seal(e) || !th_search(&th_work) ||
++    uint32_t i = th_store_find(&th_store, key, NULL);
++    if (i != UINT32_MAX) {
++        THEntry *e = &th_work;
++        if (!th_store_load(i, e)) {
++            ++th_stats[4];
++            ++th_stats[2];
++            return false;
++        }
++        if (!th_search(&th_work) ||
+             memcmp(e->guest,
+                    cpu->uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095),
+                    e->size) ||
+@@ -576,7 +667,8 @@
+                 (uintptr_t)s->code_gen_highwater - (uintptr_t)tb->tc.ptr ||
+             !th_code(&th_work, cpu, tb, false, false)) {
+             ++th_stats[4];
+-            continue;
++            ++th_stats[2];
++            return false;
+         }
+         memcpy(tb->tc.ptr, th_work.code, e->code_size);
+         memcpy((uint8_t *)tb->tc.ptr + e->code_size, e->search, e->search_size);
+@@ -609,7 +701,7 @@
+         ++th_stats[4];
+         return;
+     }
+-    memset(e, 0, sizeof(*e));
++    memset(e, 0, offsetof(THEntry, ptrs));
+     e->key = *key;
+     e->size = tb->size;
+     e->icount = tb->icount;
+@@ -638,22 +730,8 @@
+         ++th_stats[4];
+         return;
+     }
+-    /* Replace same-key record so a code write can establish a new fixture. */
+-    for (i = 0; i < th_used; ++i) {
+-        if (!memcmp(&th_entries[i].key, key, sizeof(*key))) {
+-            break;
+-        }
+-    }
+-    if (i == th_used) {
+-        i = th_next;
+-        th_next = (th_next + 1) % TH_ARCHIVE_SLOTS;
+-        if (th_used < TH_ARCHIVE_SLOTS) {
+-            ++th_used;
+-        }
+-    }
+-    e->seal = th_seal(e);
+-    th_entries[i] = *e;
+-    ++th_stats[0];
++    if (th_store_put(&th_store, e))
++        ++th_stats[0];
+ }
+ 
+ #ifdef TOUCHHLE_TB_RESTORE_TESTS
+@@ -672,10 +750,12 @@
+     const uint8_t *p;
+     int32_t d;
+     unsigned j;
+-    if (!th_used || kind > 4) {
++    if (!th_store.count || kind > 4) {
+         return 0;
+     }
+-    e = &th_entries[0];
++    if (!th_store_load(0, &th_work))
++        return 0;
++    e = &th_work;
+     if (!th_search(e) || e->search[0] != 0) {
+         return 0;
+     }
+@@ -702,7 +782,8 @@
+         e->size -= 2;
+         break; /* Truncated mixed-width guest span. */
+     }
+-    e->seal = th_seal(e);
++    if (!th_store_put(&th_store, e))
++        return 0;
+     return !th_search(e);
+ }
+ #endif
+--- a/qemu/accel/tcg/touchhle-tb-codec.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-codec.inc.c
+@@ -3,10 +3,7 @@
+  * No native structure, padding, seal, or captured address is serialized.
+  */
+ #define TH_ID_MAX 4096
+-#define TH_WIRE_MAX                                                            \
+-    (28 + TH_ID_MAX +                                                          \
+-     TH_ARCHIVE_SLOTS *                                                        \
+-         (96 + 8 * TCG_PTR_RELOC_MAX + 4096 + TH_CODE_MAX + TH_SEARCH_MAX))
++#define TH_WIRE_MAX TH_MAX_BYTES
+ 
+ typedef struct THWire {
+     uint8_t *out;
+@@ -126,9 +123,10 @@
+  * writes to scratch; canonical goto padding/targets must already be zero. */
+ static bool th_canonical(const THEntry *e)
+ {
+-    th_work = *e;
+-    return th_code(&th_work, NULL, NULL, false, true) &&
+-           !memcmp(th_work.code, e->code, e->code_size);
++    static THEntry checked;
++    checked = *e;
++    return th_code(&checked, NULL, NULL, false, true) &&
++           !memcmp(checked.code, e->code, e->code_size);
+ }
+ static bool th_wire_header(THWire *w, const uint8_t *identity,
+                            uint32_t identity_len, uint32_t total,
+@@ -145,7 +143,7 @@
+     th_wire_int(w, &entries, 4);
+     th_wire_int(w, &idlen, 4);
+     if (!w->ok || memcmp(got, magic, 8) || version != 1 || flags ||
+-        length != total || entries > TH_ARCHIVE_SLOTS ||
++        length != total || entries > th_limit_records ||
+         idlen != identity_len || idlen > w->len - w->pos) {
+         return false;
+     }
+@@ -160,77 +158,62 @@
+     *count = entries;
+     return true;
+ }
++#include "touchhle-tb-store.inc.c"
++
+ uint32_t touchhle_tb_archive_export(const uint8_t *identity,
+                                     uint32_t identity_len, uint8_t *output,
+                                     uint32_t capacity)
+ {
+-    THWire w = {.len = TH_WIRE_MAX, .ok = true};
+-    uint32_t i, count = th_used, total;
+-    if (!identity || !identity_len || identity_len > TH_ID_MAX) {
+-        return 0;
+-    }
+-    /* Dry run validates every record before writing anything to output. */
+-    w.pos = 28 + identity_len;
++    uint32_t i, count = th_store.count, total;
++    THWire w;
++    if (!identity || !identity_len || identity_len > TH_ID_MAX ||
++        th_store.wire > TH_WIRE_MAX - 28 - identity_len)
++        return 0;
++    total = 28 + identity_len + th_store.wire;
++    /* Packed records were checked before storage. A checksum covers only their
++     * used bytes, not the maximum-size scratch arrays for every lookup. */
+     for (i = 0; i < count; ++i) {
+-        if (th_entries[i].seal != th_seal(&th_entries[i]) ||
+-            !th_canonical(&th_entries[i]) || !th_wire_record(&w, &th_work)) {
++        THPacked *p = th_store.entries[i];
++        if (p->seal != th_bytes_seal(p->bytes, p->size))
+             return 0;
+-        }
+-    }
+-    total = w.pos;
+-    if (!output) {
++    }
++    if (!output)
+         return total;
+-    }
+-    if (capacity < total) {
+-        return 0;
+-    }
++    if (capacity < total)
++        return 0;
+     w = (THWire){.out = output, .len = total, .ok = true};
+-    if (!th_wire_header(&w, identity, identity_len, total, &count)) {
+-        return 0;
+-    }
++    if (!th_wire_header(&w, identity, identity_len, total, &count))
++        return 0;
+     for (i = 0; i < count; ++i) {
+-        th_work = th_entries[i];
+-        if (!th_wire_record(&w, &th_work)) {
+-            return 0;
+-        }
+-    }
+-    return w.pos == total ? total : 0;
++        THPacked *p = th_store.entries[i];
++        th_wire_bytes(&w, p->bytes, p->size);
++    }
++    return w.ok && w.pos == total ? total : 0;
+ }
+ int touchhle_tb_archive_import(const uint8_t *identity, uint32_t identity_len,
+                                const uint8_t *input, uint32_t length)
+ {
+-    THEntry *pending;
++    THStore pending = {0};
+     THWire w = {.in = input, .len = length, .ok = true};
+-    uint32_t i, j, count = 0;
+-    bool ok = false;
++    uint32_t i, count = 0;
+     if (!identity || !identity_len || identity_len > TH_ID_MAX || !input ||
+         length < 28 || length > TH_WIRE_MAX ||
+-        !th_wire_header(&w, identity, identity_len, length, &count)) {
+-        return 0;
+-    }
+-    pending = g_try_malloc0(sizeof(th_entries));
+-    if (!pending) {
+-        return 0;
+-    }
++        !th_wire_header(&w, identity, identity_len, length, &count))
++        return 0;
+     for (i = 0; i < count; ++i) {
+-        if (!th_wire_record(&w, &pending[i]) || !th_canonical(&pending[i])) {
+-            goto done;
+-        }
+-        for (j = 0; j < i; ++j) {
+-            if (!memcmp(&pending[i].key, &pending[j].key, sizeof(THKey))) {
+-                goto done;
+-            }
+-        }
+-        pending[i].seal = th_seal(&pending[i]);
+-    }
+-    if (w.pos != length) {
+-        goto done;
+-    }
+-    memcpy(th_entries, pending, sizeof(th_entries));
+-    th_used = count;
+-    th_next = count % TH_ARCHIVE_SLOTS;
+-    ok = true;
+-done:
+-    g_free(pending);
+-    return ok;
+-}
++        /* Clear metadata/padding, not unused 30KiB scratch capacity. */
++        memset(&th_work, 0, offsetof(THEntry, ptrs));
++        if (!th_wire_record(&w, &th_work) || !th_canonical(&th_work) ||
++            th_store_find(&pending, &th_work.key, NULL) != UINT32_MAX ||
++            !th_store_put(&pending, &th_work))
++            goto fail;
++    }
++    if (w.pos != length)
++        goto fail;
++    th_store_destroy(&th_store);
++    th_store = pending;
++    return 1;
++fail:
++    th_store_destroy(&pending);
++    return 0;
++}
+--- a/qemu/accel/tcg/touchhle-tb-codec-tests.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-codec-tests.inc.c
+@@ -10,10 +10,10 @@
+     uint32_t aligned[8] = {0};
+     unsigned i;
+     if (insert) {
+-        if (th_used == TH_ARCHIVE_SLOTS) {
++        if (th_store.count == th_limit_records) {
+             return 0;
+         }
+-        e = &th_entries[th_used++];
++        e = &th_work;
+         memset(e, 0, sizeof(*e));
+         scalar = (uintptr_t)uc;
+         e->key.contract = 1;
+@@ -39,16 +39,18 @@
+         e->ptr_count = 1;
+         e->ptrs[0].offset = 10;
+         e->ptrs[0].recipe = TCG_PTR_CURRENT_UC;
+-        e->seal = th_seal(e);
+-        th_next = th_used % TH_ARCHIVE_SLOTS;
++        if (!th_store_put(&th_store, e))
++            return 0;
+     } else {
+         if ((uint32_t)(uintptr_t)uc == scalar) {
+             return 0; /* Fixture must actually prove different numerical values.
+                        */
+         }
+-        for (i = 0; i < th_used; ++i) {
+-            if (th_entries[i].key.pc == 0x3000) {
+-                e = &th_entries[i];
++        for (i = 0; i < th_store.count; ++i) {
++            if (th_store.entries[i]->key.pc == 0x3000) {
++                if (!th_store_load(i, &th_work))
++                    return 0;
++                e = &th_work;
+                 break;
+             }
+         }
+@@ -66,3 +68,18 @@
+     return insert ? scalar : 1;
+ }
+ #endif
++
++/* TESTS-only opcode metadata for original authored wire fixtures. No archive
++ * publication, validation bypass, or execution of synthetic records. */
++unsigned touchhle_tb_archive_test_domain_opcode(unsigned n)
++{
++    static const unsigned ops[] = {INDEX_op_setcond_i32, INDEX_op_brcond_i32,
++                                   INDEX_op_brcond2_i32, INDEX_op_qemu_ld_i32,
++                                   INDEX_op_qemu_st_i32, INDEX_op_qemu_ld_i64,
++                                   INDEX_op_qemu_st_i64, INDEX_op_mb};
++    return n < ARRAY_SIZE(ops) ? ops[n] : 0;
++}
++
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++#include "touchhle-tb-store-tests.inc.c"
++#endif
+--- /dev/null
++++ b/qemu/accel/tcg/touchhle-tb-store.inc.c
+@@ -0,0 +1,206 @@
++/* Bounded exact-runtime record storage. LGPL-2.1-or-later.
++ * This index is rebuilt, never serialized. No ownership pointer is imported. */
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++static int th_fail_after = -1;
++void touchhle_tb_archive_test_fail_after(int n) { th_fail_after = n; }
++#endif
++static void *th_alloc(uint32_t bytes)
++{
++    void *p;
++#ifdef TOUCHHLE_TB_RESTORE_TESTS
++    if (th_fail_after == 0)
++        return NULL;
++    if (th_fail_after > 0)
++        --th_fail_after;
++#endif
++    if (bytes > 2ULL * TH_MAX_BYTES - th_allocated)
++        return NULL;
++    p = g_try_malloc0(bytes);
++    if (p) {
++        th_allocated += bytes;
++        th_peak = MAX(th_peak, th_allocated);
++    }
++    return p;
++}
++static void th_free(void *p, uint32_t bytes)
++{
++    if (p) {
++        g_free(p);
++        th_allocated -= bytes;
++    }
++}
++static uint32_t th_key_hash(const THKey *k)
++{
++    uint32_t v[] = {k->contract,
++                    k->contract >> 32,
++                    k->features,
++                    k->features >> 32,
++                    k->exit,
++                    k->exit >> 32,
++                    k->pc,
++                    k->cs_base,
++                    k->flags,
++                    k->cflags,
++                    k->trace,
++                    k->model,
++                    k->mode,
++                    k->max_insns,
++                    k->budget_active | (k->budget_adapter << 1) |
++                        (k->no_exit_request << 2)};
++    uint32_t h = 2166136261u;
++    unsigned i;
++    for (i = 0; i < ARRAY_SIZE(v); ++i)
++        h = (h ^ v[i]) * 16777619u;
++    h ^= h >> 16;
++    h *= 0x7feb352du;
++    h ^= h >> 15;
++    h *= 0x846ca68bu;
++    return h ^ (h >> 16);
++}
++static bool th_key_equal(const THKey *a, const THKey *b)
++{
++    return a->contract == b->contract && a->features == b->features &&
++           a->exit == b->exit && a->pc == b->pc && a->cs_base == b->cs_base &&
++           a->flags == b->flags && a->cflags == b->cflags &&
++           a->trace == b->trace && a->model == b->model && a->mode == b->mode &&
++           a->max_insns == b->max_insns &&
++           a->budget_active == b->budget_active &&
++           a->budget_adapter == b->budget_adapter &&
++           a->no_exit_request == b->no_exit_request;
++}
++static uint32_t th_store_find(THStore *store, const THKey *key, uint32_t *slot)
++{
++    uint32_t hash = th_key_hash(key), at, probes;
++    if (!store->index)
++        return UINT32_MAX;
++    at = hash & store->mask;
++    for (probes = 0; probes <= store->mask; ++probes) {
++        uint32_t index = store->index[at];
++        ++store->probes;
++        if (!index) {
++            if (slot)
++                *slot = at;
++            return UINT32_MAX;
++        }
++        THPacked *p = store->entries[index - 1];
++        if (p->hash == hash && th_key_equal(&p->key, key)) {
++            if (slot)
++                *slot = at;
++            return index - 1;
++        }
++        at = (at + 1) & store->mask;
++    }
++    /* With <=50% load and no deletion this is an invariant violation. */
++    g_assert_not_reached();
++}
++static bool th_store_init(THStore *store)
++{
++    uint32_t slots = 2, pointers = th_limit_records * sizeof(*store->entries);
++    uint32_t indices;
++    if (store->index)
++        return true;
++    while (slots < 2 * th_limit_records)
++        slots <<= 1;
++    indices = slots * sizeof(*store->index);
++    if (pointers + indices > th_limit_bytes) {
++        ++store->quota;
++        return false;
++    }
++    store->entries = th_alloc(pointers);
++    store->index = th_alloc(indices);
++    if (!store->entries || !store->index) {
++        th_free(store->entries, pointers);
++        th_free(store->index, indices);
++        store->entries = NULL;
++        store->index = NULL;
++        ++store->oom;
++        return false;
++    }
++    store->mask = slots - 1;
++    store->resident = pointers + indices;
++    return true;
++}
++static void th_store_destroy(THStore *store)
++{
++    uint32_t i;
++    for (i = 0; i < store->count; ++i) {
++        THPacked *p = store->entries[i];
++        th_free(p, sizeof(*p) + p->size);
++    }
++    th_free(store->index, (store->mask + 1) * sizeof(*store->index));
++    th_free(store->entries, th_limit_records * sizeof(*store->entries));
++    memset(store, 0, sizeof(*store));
++}
++int touchhle_tb_archive_limits(uint32_t records, uint32_t bytes)
++{
++    if (!records || records > TH_MAX_RECORDS || !bytes ||
++        bytes > TH_MAX_BYTES || th_store.count)
++        return 0;
++    th_store_destroy(&th_store);
++    th_limit_records = records;
++    th_limit_bytes = bytes;
++    return 1;
++}
++static bool th_store_put(THStore *store, THEntry *e)
++{
++    static uint8_t encoded[TH_RECORD_MAX];
++    THWire w = {.out = encoded, .len = sizeof(encoded), .ok = true};
++    uint32_t index, slot = 0, old_size = 0, allocation;
++    uint64_t seal;
++    THPacked *p, *old = NULL;
++    if (!th_wire_record(&w, e) || !th_store_init(store))
++        return false;
++    seal = th_bytes_seal(encoded, w.pos);
++    index = th_store_find(store, &e->key, &slot);
++    if (index != UINT32_MAX) {
++        old = store->entries[index];
++        old_size = sizeof(*old) + old->size;
++        if (old->size == w.pos && old->seal == seal &&
++            !memcmp(old->bytes, encoded, w.pos)) {
++            ++store->dedup;
++            return true;
++        }
++    } else if (store->count == th_limit_records) {
++        ++store->quota;
++        return false;
++    }
++    allocation = sizeof(*p) + w.pos;
++    if (allocation > th_limit_bytes - (store->resident - old_size)) {
++        ++store->quota;
++        return false;
++    }
++    p = th_alloc(allocation);
++    if (!p) {
++        ++store->oom;
++        return false;
++    }
++    p->key = e->key;
++    p->size = w.pos;
++    p->hash = th_key_hash(&e->key);
++    memcpy(p->bytes, encoded, w.pos);
++    p->seal = seal;
++    store->resident = store->resident - old_size + allocation;
++    store->wire = store->wire - (old ? old->size : 0) + p->size;
++    if (old) {
++        ++store->replaced;
++        th_free(old, old_size);
++    } else {
++        index = store->count++;
++        store->index[slot] = index + 1;
++    }
++    store->entries[index] = p;
++    return true;
++}
++static bool th_store_load(unsigned slot, THEntry *e)
++{
++    THPacked *p;
++    THWire w;
++    if (slot >= th_store.count)
++        return false;
++    p = th_store.entries[slot];
++    if (p->seal != th_bytes_seal(p->bytes, p->size))
++        return false;
++    memset(e, 0, offsetof(THEntry, ptrs));
++    w = (THWire){.in = p->bytes, .len = p->size, .ok = true};
++    return th_wire_record(&w, e) && w.pos == p->size;
++}
+--- /dev/null
++++ b/qemu/accel/tcg/touchhle-tb-store-tests.inc.c
+@@ -0,0 +1,62 @@
++/* Original storage fixtures, LGPL-2.1-or-later. TESTS only, never execute
++ * clones. */
++static THEntry th_test_seed;
++static bool th_test_seed_valid;
++int touchhle_tb_archive_test_seed(unsigned slot)
++{
++    th_test_seed_valid =
++        th_store_load(slot, &th_test_seed) && th_canonical(&th_test_seed);
++    return th_test_seed_valid;
++}
++/* Contract-only clones exercise storage cardinality, not game coverage. */
++int touchhle_tb_archive_test_put(unsigned contract, unsigned variant)
++{
++    if (!th_test_seed_valid || !contract || variant > 2)
++        return 0;
++    th_work = th_test_seed;
++    th_work.key.contract = contract;
++    if (variant)
++        th_work.guest[0] ^= 1;
++    if (variant == 2) {
++        if (th_work.code_size > TH_CODE_MAX - 2)
++            return 0;
++        th_work.code[th_work.code_size++] = INDEX_op_mb;
++        th_work.code[th_work.code_size++] = 2;
++    }
++    if (!th_canonical(&th_work))
++        return 0;
++    return th_store_put(&th_store, &th_work);
++}
++unsigned touchhle_tb_archive_test_fill(unsigned first, unsigned count)
++{
++    unsigned i;
++    for (i = 0; i < count; ++i) {
++        if (!touchhle_tb_archive_test_put(first + i, 0))
++            break;
++    }
++    return i;
++}
++/* Return 0 absent/corrupt, 1 original, 2 changed guest, 3 larger payload. */
++unsigned touchhle_tb_archive_test_find(unsigned contract)
++{
++    THKey key = th_test_seed.key;
++    uint32_t at;
++    if (!th_test_seed_valid)
++        return 0;
++    key.contract = contract;
++    at = th_store_find(&th_store, &key, NULL);
++    if (at == UINT32_MAX || !th_store_load(at, &th_work))
++        return 0;
++    if (th_work.code_size == th_test_seed.code_size + 2)
++        return 3;
++    return th_work.guest[0] == th_test_seed.guest[0] ? 1 : 2;
++}
++unsigned touchhle_tb_archive_test_scan(unsigned first, unsigned count)
++{
++    unsigned i;
++    for (i = 0; i < count; ++i) {
++        if (touchhle_tb_archive_test_find(first + i) != 1)
++            break;
++    }
++    return i;
++}
+--- a/qemu/include/tcg/touchhle-tb-archive.h
++++ b/qemu/include/tcg/touchhle-tb-archive.h
+@@ -9,12 +9,20 @@
+  * persistence. */
+ int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract);
+ void touchhle_tb_archive_clear(void);
++/* Configure while archive is empty. 1..524288 records, at most256MiB resident
++ * storage; wire import also has a256MiB bound. Clear releases all storage but
++ * preserves configured limits. Capture stops with explicit omissions at quota.
++ * Staging peak is bounded at512MiB excluding caller input/output and scratch.
++ */
++int touchhle_tb_archive_limits(uint32_t records, uint32_t bytes);
+ /* Explicit runtime/configuration descriptor, 1..4096 bytes, compared exactly.
+  * Caller binds configured CPUs separately and promises immutable configuration.
+  * Descriptor MUST identify exact runtime/helper/opcode ABI and config, not just
+  * the numeric contract. No automatic complete configuration attestation.
+  * Export: NULL output queries size; otherwise capacity must suffice. 0 fails.
+- * Import: 1 succeeds atomically, 0 leaves archive/counters unchanged.
++ * Import: 1 succeeds atomically, 0 leaves the archive, store counters, and
++ * current allocation unchanged. The allocation high-water mark includes
++ * failed staging attempts; it is deliberately not rolled back.
+  * Local trusted captures only; no executable-safety or authentication claim.
+  * Single thread, nonreentrant. Canonical imported bytes are never published.
+  */
+@@ -23,8 +31,16 @@
+                                     uint32_t capacity);
+ int touchhle_tb_archive_import(const uint8_t *identity, uint32_t identity_len,
+                                const uint8_t *input, uint32_t length);
+-/* 0 captures, 1 restores, 2 eligible misses, 3 gen_intermediate_code calls,
+- * 4 capture/restore rejections. Counters are module-wide. */
++/* Module-wide counters: 0 captures, 1 restores, 2 eligible misses,
++ * 3 gen_intermediate_code calls, 4 capture/restore rejections, 5 record count,
++ * 6 packed record bytes (excluding wire header/identity), 7 resident requested
++ * allocation bytes, 8 capture quota omissions, 9 capture allocation failures,
++ * 10 deduplications, 11 replacements, 12 index probes, 13 allocation high-water
++ * mark (including failed import staging), 14 current requested allocations.
++ * Store counters 5..12 describe the currently attached store; successful import
++ * replaces them. Failed staging counters are discarded. Allocation counters
++ * exclude caller buffers, static scratch, allocator overhead and freed heap
++ * capacity. Clear releases storage and resets counters/peak. */
+ uint64_t touchhle_tb_archive_stat(unsigned counter);
+ /* Test-only corruption seam: section 0 guest, 1 TCI, 2 search. */
+ int touchhle_tb_archive_mutate(unsigned slot, unsigned section, unsigned offset,

@@ -137,6 +137,7 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     };
 
     let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, touches);
 
     for (finger_id, coords) in map {
         let current_touches = &mut env.framework_state.uikit.ui_touch.current_touches;
@@ -148,7 +149,9 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
                 "Warning: New touch {:?} initiated but current touch did not end yet, treating as movement.",
                 finger_id
             );
-            return handle_touches_move(env, HashMap::from([(finger_id, coords)]));
+            handle_touches_move(env, HashMap::from([(finger_id, coords)]));
+            release(env, pool);
+            return;
         }
 
         log_dbg!("Finger {:?} touch down: {:?}", finger_id, coords);
@@ -184,6 +187,7 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     }
 
     let all_touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, all_touches);
     for &touch in env
         .framework_state
         .uikit
@@ -288,6 +292,7 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
         // won't end up with an empty set.
         if let Entry::Vacant(e) = view_touches.entry(view) {
             let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+            autorelease(env, touches);
             e.insert(touches);
         }
         let touches: id = *view_touches.get(&view).unwrap();
@@ -324,6 +329,7 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     };
 
     let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, touches);
 
     // view to set of touches for this view
     let mut view_touches: HashMap<id, id> = HashMap::new();
@@ -367,6 +373,7 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
 
         if let Entry::Vacant(e) = view_touches.entry(view) {
             let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+            autorelease(env, touches);
             e.insert(touches);
         }
         let touches: id = *view_touches.get(&view).unwrap();
@@ -374,6 +381,7 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     }
 
     let all_touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, all_touches);
     for &touch in env
         .framework_state
         .uikit
@@ -410,10 +418,12 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     };
 
     let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, touches);
 
     // We need to construct all touches set _BEFORE_ removing touches!
     // (as removed one are reported as the part of the event)
     let all_touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+    autorelease(env, all_touches);
     for &touch in env
         .framework_state
         .uikit
@@ -462,6 +472,7 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
 
         if let Entry::Vacant(e) = view_touches.entry(view) {
             let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+            autorelease(env, touches);
             e.insert(touches);
         }
         let touches: id = *view_touches.get(&view).unwrap();

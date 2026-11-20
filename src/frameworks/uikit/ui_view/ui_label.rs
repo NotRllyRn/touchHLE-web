@@ -23,6 +23,8 @@ use crate::objc::{
 type UIBaselineAdjustment = NSInteger;
 
 pub struct UILabelHostObject {
+    #[cfg(target_os = "emscripten")]
+    pub(crate) web_text_revision: u64,
     superclass: super::UIViewHostObject,
     /// `NSString*`
     text: id,
@@ -38,6 +40,8 @@ impl_HostObject_with_superclass!(UILabelHostObject);
 impl Default for UILabelHostObject {
     fn default() -> Self {
         UILabelHostObject {
+            #[cfg(target_os = "emscripten")]
+            web_text_revision: 0,
             superclass: Default::default(),
             text: nil,
             font: nil,
@@ -111,6 +115,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         text_alignment: _,
         line_break_mode: _,
         number_of_lines: _,
+        ..
     } = env.objc.borrow(this);
     release(env, text);
     release(env, font);
@@ -124,6 +129,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<UILabelHostObject>(this).text
 }
 - (())setText:(id)new_text { // NSString*
+    #[cfg(target_os = "emscripten")]
+    { let h = env.objc.borrow_mut::<UILabelHostObject>(this); h.web_text_revision = h.web_text_revision.saturating_add(1); }
     let new_text: id = msg![env; new_text copy];
     let old_text = std::mem::replace(
         &mut env.objc.borrow_mut::<UILabelHostObject>(this).text,
@@ -255,6 +262,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         text_alignment,
         line_break_mode,
         number_of_lines,
+        ..
     } = env.objc.borrow_mut(this);
 
     let (r, g, b, a) = ui_color::get_rgba(&env.objc, text_color);
@@ -312,3 +320,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(target_os = "emscripten")]
+impl UILabelHostObject {
+    pub(crate) fn web_text_value(&self) -> id {
+        self.text
+    }
+}

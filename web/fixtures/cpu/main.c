@@ -8,6 +8,8 @@
 #include <unicorn/unicorn.h>
 
 extern void run_shared_cpu_checks(void);
+extern void float_conversion_checks(void);
+extern void restore_stop_checks(void);
 extern void adapter_checks(void);
 extern void cache_checks(void);
 extern void rust_memory_write(uint64_t, uint32_t, int64_t);
@@ -159,6 +161,8 @@ int main(void) {
     }
   }
   free(stack); free(guest_async); free(main_async);
+  float_conversion_checks();
+  restore_stop_checks();
   puts("PASS source-built Unicorn/Rust shared memory, ARM, Thumb, VFP, FPSCR contexts, callbacks, SVC, faults, budgets and nested ARM/host fiber reentry");
   return 0;
 }

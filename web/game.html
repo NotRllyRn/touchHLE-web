@@ -1,17 +1,41 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
-<title>touchHLE game</title>
-<link rel="stylesheet" href="style.css">
-<main>
-  <h1 id="title">Loading game…</h1>
-  <canvas id="canvas" width="1024" height="768"></canvas>
-  <button id="run" disabled>Play</button><button id="stop" disabled>Stop</button>
-  <p>Tap or click to interact. Pinch with two fingers, or scroll to zoom.</p>
-  <p id="state" role="status">Downloading game…</p>
-  <details><summary>Runtime log</summary><pre id="status"></pre></details>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+<title>Loading game</title>
+<link rel="stylesheet" href="dashboard.css">
+<main id="game" aria-label="Game">
+  <canvas id="canvas" width="1024" height="768" aria-label="Game screen" hidden></canvas>
+  <div id="loading">
+    <p id="state" role="status">Checking for game updates…</p>
+    <progress id="progress" aria-label="Game download"></progress>
+  </div>
+  <header id="toolbar" hidden>
+    <span id="running-state" role="status">Starting game…</span>
+    <details id="options">
+      <summary>More options</summary>
+      <div class="menu">
+        <p id="title"></p>
+        <button id="restart" type="button">Restart game…</button>
+        <button id="saved-files" type="button">Saved files…</button>
+        <button id="retry-save" type="button" hidden>Retry saving</button>
+        <button id="sound" type="button">Enable sound</button>
+        <p id="cache-state"></p>
+        <p id="save-state" role="status">Progress stays in this browser.</p>
+      </div>
+    </details>
+  </header>
 </main>
+<dialog id="restart-dialog" aria-labelledby="restart-title">
+  <h2 id="restart-title">Restart the game?</h2>
+  <p>Your saved progress will be kept. The game will start again from its opening screen.</p>
+  <button id="confirm-restart" type="button">Save and restart</button>
+  <button id="cancel-restart" type="button" autofocus>Keep playing</button>
+</dialog>
+<dialog id="files-dialog" aria-label="Saved files">
+  <div id="files-content"></div>
+  <button id="resume" type="button">Return to game</button>
+</dialog>
 <script type="module" src="game.mjs"></script>
 </html>

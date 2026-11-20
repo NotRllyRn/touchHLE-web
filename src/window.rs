@@ -164,6 +164,8 @@ pub enum Event {
     /// take over.
     EnterDebugger,
     TextInput(TextInputEvent),
+    #[cfg(target_os = "emscripten")]
+    WebText([u32; 5]),
 }
 
 pub enum BatteryState {
@@ -878,6 +880,16 @@ impl Window {
     /// Pop an event from the queue (in FIFO order, except for high priority
     /// events)
     pub fn pop_event(&mut self) -> Option<Event> {
+        #[cfg(target_os = "emscripten")]
+        {
+            extern "C" {
+                fn touchhle_web_text_take(event: *mut u32) -> i32;
+            }
+            let mut event = [0; 5];
+            if unsafe { touchhle_web_text_take(event.as_mut_ptr()) } != 0 {
+                return Some(Event::WebText(event));
+            }
+        }
         self.high_priority_event
             .take()
             .or_else(|| self.event_queue.pop_front())
@@ -1458,7 +1470,24 @@ impl Window {
 }
 
 pub fn open_url(env: &mut Environment, url: &str) -> Result<(), String> {
-    env.on_parent_stack_in_coroutine(|_, _| sdl2::url::open_url(url).map_err(|e| e.to_string()))
+    #[cfg(not(target_os = "emscripten"))]
+    {
+        env.on_parent_stack_in_coroutine(|_, _| sdl2::url::open_url(url).map_err(|e| e.to_string()))
+    }
+    #[cfg(target_os = "emscripten")]
+    {
+        let _ = env;
+        unsafe extern "C" {
+            fn touchhle_web_open_url(bytes: *const u8, length: usize) -> i32;
+        }
+        // Explicit length preserves embedded NUL for rejection instead of silently
+        // truncating the guest string at a C-string boundary.
+        if unsafe { touchhle_web_open_url(url.as_ptr(), url.len()) } != 0 {
+            Ok(())
+        } else {
+            Err("Browser rejected the external link request".into())
+        }
+    }
 }
 
 /// Show an SDL messagebox for an error (typically after a panic).

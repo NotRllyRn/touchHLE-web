@@ -12,18 +12,37 @@ fn rerun_if_changed(path: &Path) {
 }
 
 pub fn main() {
+    println!("cargo:rustc-check-cfg=cfg(touchhle_web_tb_archive)");
+    println!("cargo:rerun-if-env-changed=TOUCHHLE_WEB_TB_ARCHIVE");
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "emscripten" {
         let unicorn = std::env::var("TOUCHHLE_UNICORN_SOURCE")
             .expect("Set TOUCHHLE_UNICORN_SOURCE to the pinned, built Unicorn.js source directory");
-        cc::Build::new()
+        let archive = std::env::var("TOUCHHLE_WEB_TB_ARCHIVE").as_deref() == Ok("1");
+        let mut adapters = cc::Build::new();
+        adapters
             .file("src/web/cpu.c")
             .file("src/web/fibers.c")
-            .flag("-sUSE_SDL=2")
-            .include(format!("{unicorn}/unicorn/include"))
-            .compile("touchhle_web_adapters");
-        println!("cargo:rustc-link-search=native={unicorn}/unicorn/build-wasm-eh");
+            .flag("-sUSE_SDL=2");
+        let library = if archive {
+            println!("cargo:rustc-cfg=touchhle_web_tb_archive");
+            adapters
+                .file("src/web/tb-native-bridge.c")
+                .define("TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE", None)
+                .define("TOUCHHLE_TB_SEAL_PROTOTYPE", None)
+                .include(format!("{unicorn}/include"));
+            std::env::var("TOUCHHLE_UNICORN_BUILD")
+                .expect("Set TOUCHHLE_UNICORN_BUILD to the isolated archive core build")
+        } else {
+            adapters.include(format!("{unicorn}/unicorn/include"));
+            format!("{unicorn}/unicorn/build-wasm-eh")
+        };
+        adapters.compile("touchhle_web_adapters");
+        println!("cargo:rustc-link-search=native={library}");
         println!("cargo:rustc-link-lib=static=unicorn");
-        println!("cargo:rerun-if-changed={unicorn}/unicorn/build-wasm-eh/libunicorn.a");
+        println!("cargo:rerun-if-changed={library}/libunicorn.a");
+        println!("cargo:rerun-if-changed=src/web/tb-native-bridge.c");
+        println!("cargo:rerun-if-changed=src/web/tb-native-bridge.h");
+        println!("cargo:rerun-if-env-changed=TOUCHHLE_UNICORN_BUILD");
         println!("cargo:rerun-if-changed=src/web/cpu.c");
         println!("cargo:rerun-if-changed=src/web/fibers.c");
         println!("cargo:rerun-if-env-changed=TOUCHHLE_UNICORN_SOURCE");

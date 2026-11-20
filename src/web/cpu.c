@@ -7,8 +7,23 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#ifndef __EMSCRIPTEN__
+#undef TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE
+#undef TOUCHHLE_TB_SEAL_PROTOTYPE
+#endif
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+#include "tb-native-bridge.h"
+#endif
 typedef struct { uint32_t regs[16], extregs[64], cpsr, fpscr; } Context;
-typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; int stepping; int vectors_loaded; int cpsr_dirty; uint32_t *regs; } Cpu;
+typedef struct { uc_engine *uc; Context context; int result; int mapped; uint64_t executed; int stepping; int vectors_loaded; int cpsr_dirty; uint32_t *regs;
+#if defined(TOUCHHLE_TB_SEAL_PROTOTYPE) &&                                     \
+    !defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE)
+    uint8_t archive_identity[2048];
+    uint32_t archive_identity_len;
+    int archive_attempted;
+#endif
+} Cpu;
 extern void touchHLE_web_map_memory(void *mem, Cpu *cpu);
 extern size_t touchHLE_uc_executed(uc_engine *uc);
 extern void touchHLE_uc_set_budget(uc_engine *uc, int32_t remaining);
@@ -16,6 +31,18 @@ extern int32_t touchHLE_uc_remaining(uc_engine *uc);
 extern void touchHLE_uc_read_region(uc_engine *uc, uint32_t base, uint32_t size, void *pointer);
 extern uint32_t *touchHLE_uc_arm_regs(uc_engine *uc);
 extern int32_t touchHLE_uc_svc(uc_engine *uc);
+#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
+extern uc_err touchHLE_uc_archive_new(uc_engine **, void *, void *, void *);
+extern int touchHLE_uc_archive_seal(uc_engine *, const uint8_t *, uint32_t);
+#ifndef TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE
+/* Integration-private configuration: exact verified package/IPA/options bytes
+ * must be supplied by the parent bridge. This function computes NO hashes. */
+int touchHLE_web_archive_configure(Cpu *cpu, const uint8_t *identity, uint32_t length) {
+  if (cpu->mapped || cpu->archive_attempted || !identity || !length || length > 2048) return 0;
+  memcpy(cpu->archive_identity, identity, length); cpu->archive_identity_len = length; return 1;
+}
+#endif
+#endif
 static bool invalid_memory(uc_engine *uc, uc_mem_type type, uint64_t address,
                            int size, int64_t value, void *user) {
   (void)value; (void)user;
@@ -34,6 +61,17 @@ static void interrupt(uc_engine *uc, uint32_t number, void *user) {
 Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
   (void)unused; (void)null_pages;
   Cpu *cpu = calloc(1, sizeof(Cpu)); assert(cpu);
+#ifdef TOUCHHLE_TB_SEAL_PROTOTYPE
+#ifdef TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE
+  if (touchhle_web_tb_wants_archive()) {
+#endif
+  assert(touchHLE_uc_archive_new(&cpu->uc, interrupt, invalid_memory, cpu) == UC_ERR_OK);
+#ifdef TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE
+  } else
+#endif
+#endif
+#if !defined(TOUCHHLE_TB_SEAL_PROTOTYPE) || defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE)
+  {
   assert(uc_open(UC_ARCH_ARM, UC_MODE_ARM, &cpu->uc) == UC_ERR_OK);
   uint32_t cpacr = 0xf << 20, fpexc = 0x40000000;
   assert(uc_reg_write(cpu->uc, UC_ARM_REG_C1_C0_2, &cpacr) == UC_ERR_OK);
@@ -41,9 +79,15 @@ Cpu *touchHLE_DynarmicWrapper_new(void *unused, size_t null_pages) {
   uc_hook hook;
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_INTR, interrupt, cpu, 1, 0) == UC_ERR_OK);
   assert(uc_hook_add(cpu->uc, &hook, UC_HOOK_MEM_INVALID, invalid_memory, cpu, 1, 0) == UC_ERR_OK);
+  }
+#endif
   cpu->regs = touchHLE_uc_arm_regs(cpu->uc);
   cpu->context.cpsr = 0x10;
   cpu->cpsr_dirty = 1;
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+  touchhle_web_tb_created(cpu->uc);
+#endif
   return cpu;
 }
 void touchHLE_web_map(Cpu *cpu, uint32_t base, size_t len, void *pointer) {
@@ -52,7 +96,16 @@ void touchHLE_web_map(Cpu *cpu, uint32_t base, size_t len, void *pointer) {
   // installs interrupt/invalid-memory hooks. Keep the fast-read API private.
   touchHLE_uc_read_region(cpu->uc, base, len, pointer);
 }
-void touchHLE_DynarmicWrapper_delete(Cpu *cpu) { uc_close(cpu->uc); free(cpu); }
+void touchHLE_DynarmicWrapper_delete(Cpu *cpu)
+{
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+    if (!touchhle_web_tb_closing(cpu->uc))
+        return; // Refuse active/nested close.
+#endif
+    uc_close(cpu->uc);
+    free(cpu);
+}
 const uint32_t *touchHLE_DynarmicWrapper_regs_const(const Cpu *cpu) { return cpu->regs; }
 uint32_t *touchHLE_DynarmicWrapper_regs_mut(Cpu *cpu) { return cpu->regs; }
 uint32_t touchHLE_DynarmicWrapper_cpsr(const Cpu *cpu) { return cpu->context.cpsr; }
@@ -77,35 +130,67 @@ void touchHLE_DynarmicWrapper_invalidate_cache_range(Cpu *cpu, uint32_t start, u
   if (cpu->mapped) assert(uc_ctl_remove_cache(cpu->uc, (uint64_t)start, (uint64_t)start + size) == UC_ERR_OK);
 }
 int32_t touchHLE_DynarmicWrapper_run_or_step(Cpu *cpu, void *mem, uint64_t *ticks) {
-  if (!cpu->mapped) { touchHLE_web_map_memory(mem, cpu); cpu->mapped = 1; }
-  Context *c = &cpu->context;
-  // CPSR mode changes bank r8-r14. Preserve the caller's supplied registers,
-  // matching the original adapter's CPSR-then-registers write order.
-  if (cpu->cpsr_dirty) {
-    memcpy(c->regs, cpu->regs, sizeof(c->regs));
-    assert(uc_reg_write(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
-    memcpy(cpu->regs, c->regs, sizeof(c->regs));
-    cpu->cpsr_dirty = 0;
-  }
-  if (!cpu->vectors_loaded) {
-    for (int i = 0; i < 32; ++i) assert(uc_reg_write(cpu->uc, UC_ARM_REG_D0+i, &c->extregs[i*2]) == UC_ERR_OK);
-    assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);
-    cpu->vectors_loaded = 1;
-  }
-  size_t budget = ticks ? (*ticks > 10000 ? 10000 : *ticks) : 1;
-  if (!budget) return -1;
-  cpu->result = -1;
-  cpu->executed = 0;
-  touchHLE_uc_set_budget(cpu->uc, ticks ? (int32_t)budget : -1);
-  // Unicorn's count hook is compiled into translated blocks. A block cached
-  // during normal execution cannot provide exact stepping without a flush.
-  if (cpu->stepping != !ticks) assert(uc_ctl_flush_tb(cpu->uc) == UC_ERR_OK);
-  cpu->stepping = !ticks;
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+    if (!touchhle_web_tb_run_enter(cpu->uc))
+        return -2;
+#endif
+    if (!cpu->mapped) {
+        touchHLE_web_map_memory(mem, cpu);
+        cpu->mapped = 1;
+    }
+    Context *c = &cpu->context;
+    // CPSR mode changes bank r8-r14. Preserve the caller's supplied registers,
+    // matching the original adapter's CPSR-then-registers write order.
+    if (cpu->cpsr_dirty) {
+        memcpy(c->regs, cpu->regs, sizeof(c->regs));
+        assert(uc_reg_write(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
+        memcpy(cpu->regs, c->regs, sizeof(c->regs));
+        cpu->cpsr_dirty = 0;
+    }
+    if (!cpu->vectors_loaded) {
+        for (int i = 0; i < 32; ++i)
+            assert(uc_reg_write(cpu->uc, UC_ARM_REG_D0 + i,
+                                &c->extregs[i * 2]) == UC_ERR_OK);
+        assert(uc_reg_write(cpu->uc, UC_ARM_REG_FPSCR, &c->fpscr) == UC_ERR_OK);
+        cpu->vectors_loaded = 1;
+    }
+    size_t budget = ticks ? (*ticks > 10000 ? 10000 : *ticks) : 1;
+    if (!budget) {
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+        touchhle_web_tb_run_leave(cpu->uc);
+#endif
+        return -1;
+    }
+    cpu->result = -1;
+    cpu->executed = 0;
+    touchHLE_uc_set_budget(cpu->uc, ticks ? (int32_t)budget : -1);
+    // Unicorn's count hook is compiled into translated blocks. A block cached
+    // during normal execution cannot provide exact stepping without a flush.
+    if (cpu->stepping != !ticks)
+        assert(uc_ctl_flush_tb(cpu->uc) == UC_ERR_OK);
+    cpu->stepping = !ticks;
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+    touchhle_web_tb_first_run(cpu->uc, ticks != NULL);
+#elif defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+    if (!cpu->archive_attempted) {
+        cpu->archive_attempted = 1;
+        if (cpu->archive_identity_len && ticks)
+            (void)touchHLE_uc_archive_seal(cpu->uc, cpu->archive_identity,
+                                           cpu->archive_identity_len);
+    }
+#endif
   uc_err error = uc_emu_start(cpu->uc, cpu->regs[15] | ((c->cpsr & 0x20) ? 1 : 0), 0, 0, ticks ? 0 : 1);
   if (!ticks) cpu->executed = touchHLE_uc_executed(cpu->uc);
   else cpu->executed = (int64_t)budget - touchHLE_uc_remaining(cpu->uc);
   if (ticks) *ticks -= cpu->executed > budget ? budget : cpu->executed;
   assert(uc_reg_read(cpu->uc, UC_ARM_REG_CPSR, &c->cpsr) == UC_ERR_OK);
+#if defined(TOUCHHLE_WEB_TB_BRIDGE_PROTOTYPE) &&                               \
+    defined(TOUCHHLE_TB_SEAL_PROTOTYPE)
+  touchhle_web_tb_run_leave(cpu->uc);
+#endif
   if (error == UC_ERR_INSN_INVALID) return -3;
   if (error != UC_ERR_OK) {
     fprintf(stderr, "Unicorn: %s at PC=0x%x LR=0x%x CPSR=0x%x\n",

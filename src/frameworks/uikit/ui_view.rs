@@ -597,6 +597,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())removeFromSuperview {
+    #[cfg(target_os = "emscripten")]
+    ui_control::ui_text_field::web_input::removed(env);
     let &mut UIViewHostObject {
         ref mut superview,
         layer: this_layer,

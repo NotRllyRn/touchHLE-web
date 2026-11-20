@@ -41,6 +41,7 @@
       this.names = [];
       this.blocks = new Map();
       this.compiled = new Map();
+      this.useClock = 0;
       this.liveBytes = 0;
       this.liveModules = 0;
       this.stats = { compiled: 0, failed: 0, hits: 0, bytes: 0, compileMs: 0, resets: 0, metadataResets: 0, evictions: 0, registered: 0, liveBytes: 0, precompiled: 0, precompiledMisses: 0, emitMs: 0, moduleMs: 0, instantiateMs: 0 };
@@ -53,6 +54,7 @@
       for (const block of this.blocks.values()) if (block.fn) this.removeFunction(block.fn);
       this.blocks.clear();
       this.compiled.clear();
+      this.useClock = 0;
       this.liveBytes = this.stats.liveBytes = 0;
       this.liveModules = 0;
       this.stats.resets++;
@@ -75,7 +77,7 @@
       if (!block || block.failed) return 0;
       if (block.fn) {
         // Native dispatch hits bypass JS; these lookups provide approximate recency.
-        this.compiled.delete(ptr); this.compiled.set(ptr, block);
+        this.touchCompiled(block);
         if (!this.dispatch) this.stats.hits++;
         return block.fn;
       }
@@ -99,7 +101,8 @@
           this.dispatch?.clear();
           // Free a quarter of capacity, retaining recent modules and translation
           // identities. Clear native pointers before any table slot is reused.
-          for (const [address, entry] of this.compiled) {
+          const oldest = [...this.compiled].sort((a, b) => (a[1].used ?? 0) - (b[1].used ?? 0));
+          for (const [address, entry] of oldest) {
             if (this.liveBytes + bytes.length <= 12 * 1024 * 1024 && this.liveModules < 6144) break;
             this.removeFunction(entry.fn);
             entry.fn = 0; entry.count = 0;
@@ -120,6 +123,7 @@
         this.portable?.capture?.({ ...description, abi: this.abi });
         block.fn = this.addFunction(instance.exports.run, 'iiiii');
         block.bytes = bytes.length;
+        this.touchCompiled(block);
         this.compiled.set(ptr, block);
         this.liveModules++;
         this.liveBytes += bytes.length;
@@ -134,11 +138,21 @@
       this.stats.compileMs += performance.now() - start;
       return block.fn;
     }
+    touchCompiled(block) {
+      // Keep hot lookups allocation-free. Sort only on eviction; counters retain
+      // exact lookup recency, including a cold renumbering at integer exhaustion.
+      if (this.useClock === Number.MAX_SAFE_INTEGER) {
+        this.useClock = 0;
+        const oldest = [...this.compiled.values()].sort((a, b) => (a.used ?? 0) - (b.used ?? 0));
+        for (const entry of oldest) entry.used = ++this.useClock;
+      }
+      block.used = ++this.useClock;
+    }
     portableAbi() {
       const d = this.dispatch;
       return JSON.stringify({ version: 3, names: this.names, call: !!d?.call,
         readLayout: d?.readLayout, exitCheck: d?.exitCheck, floatMath: d?.floatMath,
-        unaligned: d?.unaligned, pageMap: d?.pageMap, floatUnary: d?.floatUnary });
+        unaligned: d?.unaligned, pageMap: d?.pageMap, floatUnary: d?.floatUnary, floatNarrow: d?.floatNarrow, floatToInt: d?.floatToInt });
     }
     describePortable(start, length) {
       if (length <= 0 || length > 65536 || start + length > this.memory.buffer.byteLength)
@@ -306,7 +320,37 @@
           const fp = this.dispatch.floatMath;
           const operation = callee === null ? -1 : fp?.callees.indexOf(callee) ?? -1;
           const unary = callee === null ? -1 : this.dispatch.floatUnary?.indexOf(callee) ?? -1;
-          if (unary >= 0) {
+          if (callee !== null && callee === this.dispatch.floatNarrow) {
+            // Exact normal binary32 values have zero low 29 fraction bits
+            // and binary64 exponent in [-126,127]. Signed zero is also exact.
+            // Reject other values using integers before doing any FP work.
+            reg(0); constant(0x1fffffff); emit(0x71, 0x45, 0x04, 0x7f);
+            reg(1); constant(0x7fffffff); emit(0x71); set(21);
+            get(21); constant(0x38100000); emit(0x6b); constant(0x0fe00000); emit(0x49);
+            get(21); reg(0); emit(0x72, 0x45, 0x72);
+            emit(0x05); constant(0); emit(0x0b, 0x04, 0x40);
+            reg(0); emit(0xad); reg(1); emit(0xad, 0x42, 32, 0x86, 0x84, 0xbf, 0xb6, 0xbc); put(0);
+            constant(0); put(1);
+            emit(0x05); invoke(); emit(0x0b);
+          } else if (callee !== null && callee === this.dispatch.floatToInt && fp) {
+            const incoming = new Set(defined);
+            // vfp_tosizs explicitly truncates toward zero. Only normal values
+            // strictly within signed32 range, plus signed zero, bypass QEMU.
+            // ABI logical arguments occupy pairs: input r0; fpstatus pointer r2.
+            reg(0); constant(0x7fffffff); emit(0x71); set(21);
+            get(21); constant(0x00800000); emit(0x6b); constant(0x4e800000); emit(0x49);
+            get(21); emit(0x45, 0x72, 0x04, 0x40);
+            reg(0); emit(0xbe, 0xa8); set(22);
+            // Flag updates are needed even for non-default rounding modes;
+            // all other sticky flags and all fpstatus control bytes survive.
+            get(22); emit(0xb2); reg(0); emit(0xbe, 0x5c, 0x04, 0x40);
+            reg(2); reg(2); emit(0x2d, 0, ...uleb(fp.flags));
+            constant(fp.inexact); emit(0x72, 0x3a, 0, ...uleb(fp.flags), 0x0b);
+            get(22); put(0); get(22); constant(31); emit(0x75); put(1);
+            emit(0x05);
+            defined.clear(); for (const r of incoming) defined.add(r);
+            invoke(); emit(0x0b);
+          } else if (unary >= 0) {
             // ARM VNEG/VABS manipulate the sign bit, preserving NaN payloads
             // (including signaling NaNs), subnormals and all FPSCR flags.
             reg(0); constant(unary === 0 ? 0x80000000 : 0x7fffffff);

@@ -287,12 +287,17 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
         return Ok(());
     }
 
+    // Retain successfully parsed option inputs for exact archive identity.
+    // Defaults and parser semantics are pinned by the exact runtime identity.
+    #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+    let mut archive_option_inputs = Vec::<String>::new();
     // Apply options from files
     fn apply_options<F: std::io::Read, P: std::fmt::Display>(
         file: F,
         path: P,
         options: &mut options::Options,
         app_id: &str,
+        #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))] applied: &mut Vec<String>,
     ) -> Result<(), String> {
         match options::get_options_from_file(file, app_id) {
             Ok(Some(options_string)) => {
@@ -303,7 +308,10 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
                 );
                 for option_arg in options_string.split_ascii_whitespace() {
                     match options.parse_argument(option_arg) {
-                        Ok(true) => (),
+                        Ok(true) => {
+                            #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+                            applied.push(option_arg.to_owned());
+                        }
                         Ok(false) => return Err(format!("Unknown option {option_arg:?}")),
                         Err(err) => return Err(format!("Invalid option {option_arg:?}: {err}")),
                     }
@@ -320,12 +328,26 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
     }
     let default_options_path = paths::DEFAULT_OPTIONS_FILE;
     match paths::ResourceFile::open(default_options_path) {
-        Ok(mut file) => apply_options(file.get(), default_options_path, &mut options, app_id)?,
+        Ok(mut file) => apply_options(
+            file.get(),
+            default_options_path,
+            &mut options,
+            app_id,
+            #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+            &mut archive_option_inputs,
+        )?,
         Err(err) => echo!("Warning: Could not open {}: {}", default_options_path, err),
     }
     let user_options_path = paths::user_data_base_path().join(paths::USER_OPTIONS_FILE);
     match std::fs::File::open(&user_options_path) {
-        Ok(file) => apply_options(file, user_options_path.display(), &mut options, app_id)?,
+        Ok(file) => apply_options(
+            file,
+            user_options_path.display(),
+            &mut options,
+            app_id,
+            #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+            &mut archive_option_inputs,
+        )?,
         Err(err) => echo!(
             "Warning: Could not open {}: {}",
             user_options_path.display(),
@@ -336,8 +358,26 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
 
     // Apply command-line options
     for option_arg in option_args {
+        #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+        archive_option_inputs.push(option_arg.clone());
         let parse_result = options.parse_argument(&option_arg);
         assert!(parse_result == Ok(true));
+    }
+
+    #[cfg(all(target_os = "emscripten", touchhle_web_tb_archive))]
+    {
+        extern "C" {
+            fn touchhle_web_tb_options(bytes: *const u8, len: u32) -> i32;
+        }
+        // Debug strings escape delimiters and preserve the ordered vector.
+        // This is a private, exact-runtime format, not a stable public ABI.
+        let transcript = format!(
+            "loader-options-v1:{:?}",
+            (app_id, &archive_option_inputs, &app_args)
+        );
+        unsafe {
+            touchhle_web_tb_options(transcript.as_ptr(), transcript.len() as u32);
+        }
     }
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

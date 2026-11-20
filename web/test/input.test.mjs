@@ -7,10 +7,10 @@ function harness() {
   const canvas = { width: 800, height: 600,
     getBoundingClientRect: () => ({ left: 10, top: 20, width: 400, height: 300 }),
     setPointerCapture() {}, addEventListener: (name, fn) => listeners.set(name, fn) };
-  attachInput(canvas, message => messages.push(message));
+  const input = attachInput(canvas, message => messages.push(message));
   const emit = (name, props = {}) => listeners.get(name)({ pointerId: 1, pointerType: 'touch',
     clientX: 210, clientY: 170, timeStamp: 100, deltaMode: 0, preventDefault() {}, ...props });
-  return { messages, emit };
+  return { messages, emit, input };
 }
 test('two contacts keep independent identities through cancellation and movement', () => {
   const { messages, emit } = harness();
@@ -38,4 +38,15 @@ test('wheel zoom produces paired, ordered pinch events and respects active conta
   assert(messages.every((m, i) => m.timestamp === 100 + i));
   emit('pointerdown'); const count = messages.length;
   emit('wheel', { deltaY: -120 }); assert.equal(messages.length, count);
+});
+
+
+test('Stop cancellation releases every active contact once before disabling input', () => {
+  const { messages, emit, input } = harness();
+  emit('pointerdown'); emit('pointerdown', { pointerId: 2, pointerType: 'mouse' });
+  input.cancel();
+  assert.deepEqual(messages.map(m => m.kind), [0, 0, 2, 2]);
+  assert.equal(messages[2].points[0].id, 1); assert.equal(messages[3].type, 'pointer');
+  input.cancel(); emit('pointermove'); emit('pointerup'); emit('pointerdown'); emit('wheel', { deltaY: 100 });
+  assert.equal(messages.length, 4);
 });

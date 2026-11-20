@@ -2,7 +2,7 @@
 // Shared package identity contract; usable by both the producer and browser.
 export const runtimeFiles = ['touchhle-runtime.js', 'touchhle-runtime.wasm', 'touchhle-runtime.data',
   'runtime-worker.js', 'tci-jit.js', 'tci-precompile.mjs', 'audio-proxy.js', 'audio.mjs',
-  'input.mjs', 'style.css', 'package-identity.mjs'];
+  'input.mjs', 'style.css', 'package-identity.mjs', 'guest-saves.js', 'save-session.mjs', 'external-open.js', 'text-input.js', 'external-links.mjs', 'save-transfer.mjs', 'preflight.mjs', 'touchhle_browser.wasm'];
 const isHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
 export function checkIdentity(expected, actual) {

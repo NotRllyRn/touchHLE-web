@@ -9,7 +9,8 @@ use super::ui_touch::UITouchHostObject;
 use crate::frameworks::foundation::{NSTimeInterval, NSUInteger};
 use crate::mem::MutVoidPtr;
 use crate::objc::{
-    id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
+    autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
+    NSZonePtr,
 };
 use crate::Environment;
 
@@ -37,6 +38,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())dealloc {
     let &UIEventHostObject { touches, .. } = env.objc.borrow(this);
     release(env, touches);
+    env.objc.dealloc_object(this, &mut env.mem)
 }
 
 - (NSTimeInterval)timestamp {
@@ -61,7 +63,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
 
-    touches_for_view
+    autorelease(env, touches_for_view)
 }
 
 - (id)allTouches {

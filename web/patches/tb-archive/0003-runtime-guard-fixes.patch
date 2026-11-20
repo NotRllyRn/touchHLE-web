@@ -1,0 +1,64 @@
+--- a/qemu/accel/tcg/translate-all.c
++++ b/qemu/accel/tcg/translate-all.c
+@@ -1765,7 +1765,7 @@
+  tb_overflow:
+ #ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
+     archive_eligible = max_insns == MIN(CF_COUNT_MASK, TCG_MAX_INSNS) &&
+-                       th_key(cpu, tb, phys_pc, &archive_key);
++                       th_key(cpu, tb, phys_pc, &archive_key, max_insns);
+     tcg_ctx->ptr_capture_enabled = archive_eligible;
+     if (archive_eligible && th_restore(cpu, tb, &archive_key,
+                                        &gen_code_size, &search_size)) {
+--- a/qemu/accel/tcg/touchhle-tb-archive.inc.c
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -14,7 +14,7 @@
+ 
+ typedef struct THKey {
+     uint64_t contract, features, exit;
+-    uint32_t pc, cs_base, flags, cflags, trace, model, mode;
++    uint32_t pc, cs_base, flags, cflags, trace, model, mode, max_insns;
+     bool budget_active, budget_adapter, no_exit_request;
+ } THKey;
+ typedef struct THEntry {
+@@ -130,7 +130,7 @@
+ }
+ static void th_put32(uint8_t *p, uint32_t x) { memcpy(p, &x, 4); }
+ static bool th_key(CPUState *cpu, TranslationBlock *tb, tb_page_addr_t phys,
+-                   THKey *k)
++                   THKey *k, unsigned max_insns)
+ {
+     struct uc_struct *uc = cpu->uc;
+     CPUARMState *env = cpu->env_ptr;
+@@ -141,8 +141,10 @@
+             k->contract = th_engines[i].contract;
+         }
+     }
+-    if (!k->contract || !uc->touchhle_direct_memory || phys != tb->pc ||
+-        !uc->touchhle_read_pages[tb->pc >> 12] || tb->cflags != 0 ||
++    if (!k->contract || !uc->touchhle_direct_memory || phys == (tb_page_addr_t)-1 ||
++        !uc->touchhle_read_pages[tb->pc >> 12] ||
++        qemu_map_ram_ptr(uc, NULL, phys) !=
++            uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095) || (tb->cflags & ~CF_CLUSTER_MASK) != 0 ||
+         cpu->singlestep_enabled || !QTAILQ_EMPTY(&cpu->breakpoints) ||
+         !QTAILQ_EMPTY(&cpu->watchpoints) || uc->count_hook || uc->use_exits ||
+         uc->nested_level != 1 || uc->invalid_error ||
+@@ -159,6 +161,7 @@
+             return false;
+         }
+     }
++    k->max_insns = max_insns;
+     k->features = env->features;
+     k->model = uc->cpu_model;
+     k->mode = uc->mode;
+@@ -348,6 +351,11 @@
+             ok = th_reg(e->code, &pos, end) && th_ri(e->code, &pos, end) &&
+                  th_ri(e->code, &pos, end);
+             break;
++        case INDEX_op_setcond_i32:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
++                 th_ri(e->code, &pos, end) && end - pos == 1;
++            ++pos; /* Numeric condition, emitted by this exact runtime. */
++            break;
+         case INDEX_op_brcond2_i32:
+             ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
+                  th_ri(e->code, &pos, end) && th_ri(e->code, &pos, end);

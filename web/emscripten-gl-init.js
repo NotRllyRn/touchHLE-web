@@ -9,12 +9,41 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
   // draw mode in its shader-cache key, but its current-renderer shortcut can
   // bypass that key after a triangle/point transition.
   const getRenderer = GLImmediate.getRenderer;
+  const bufferedRenderers = new WeakSet();
   let rendererUsesPoints;
   GLImmediate.getRenderer = function (...args) {
     const points = GLImmediate.mode === 0; // POINTS
     if (points !== rendererUsesPoints) GLImmediate.currentRenderer = null;
     rendererUsesPoints = points;
-    return getRenderer.apply(this, args);
+    const renderer = getRenderer.apply(this, args);
+    if (!bufferedRenderers.has(renderer)) {
+      bufferedRenderers.add(renderer);
+      const prepareRenderer = renderer.prepare;
+      let vertexAttribPointer;
+      const bufferedPointer = function (location, ...values) {
+        let index;
+        if (location === renderer.positionLocation) index = GLImmediate.VERTEX;
+        else if (location === renderer.normalLocation) index = GLImmediate.NORMAL;
+        else if (location === renderer.colorLocation) index = GLImmediate.COLOR;
+        else {
+          const unit = renderer.texCoordLocations?.indexOf(location) ?? -1;
+          if (unit >= 0) index = GLImmediate.TEXTURE0 + unit;
+        }
+        const attribute = GLImmediate.clientAttributes[index];
+        if (!attribute?.bufferBinding) return vertexAttribPointer.call(this, location, ...values);
+        this.bindBuffer(this.ARRAY_BUFFER, GL.buffers[attribute.bufferBinding]);
+        return vertexAttribPointer.call(this, location, attribute.size, attribute.type,
+          values[2], attribute.stride, attribute.declaredPointer);
+      };
+      renderer.prepare = function (...args) {
+        if (!GLImmediate.touchhleBufferedAttributes) return prepareRenderer.apply(this, args);
+        vertexAttribPointer = GLctx.vertexAttribPointer;
+        GLctx.vertexAttribPointer = bufferedPointer;
+        try { return prepareRenderer.apply(this, args); }
+        finally { GLctx.vertexAttribPointer = vertexAttribPointer; }
+      };
+    }
+    return renderer;
   };
   const setAttribute = GLImmediate.setClientAttribute;
   GLImmediate.setClientAttribute = function (index, ...args) {
@@ -23,15 +52,63 @@ EGL.contextAttributes.preserveDrawingBuffer = true;
     GLImmediate.clientAttributes[index].declaredPointer = GLImmediate.clientAttributes[index].pointer;
   };
   const prepare = GLImmediate.prepareClientAttributes;
-  GLImmediate.prepareClientAttributes = function (...args) {
+  GLImmediate.prepareClientAttributes = function (count, beginEnd) {
+    // Animated meshes can split positions/normals and UVs between VBOs.
+    // The SDK's restriding path treats every pointer as a CPU address, and
+    // its interleaved path binds every attribute to the last ARRAY_BUFFER.
+    // Keep GPU attributes in their original buffers, strides and offsets.
+    const attributes = GLImmediate.liveClientAttributes;
+    if (GLImmediate.modifiedClientAttributes) {
+      attributes.length = 0;
+      for (let index = 0; index < GLImmediate.clientAttributes.length; index++) {
+        if (GLImmediate.enabledClientAttributes[index]) attributes.push(GLImmediate.clientAttributes[index]);
+      }
+    }
+    const binding = attributes[0]?.bufferBinding, stride = attributes[0]?.stride;
+    let buffered = !beginEnd && attributes.length > 0;
+    let separate = binding !== GLctx.currentArrayBufferBinding, bytes = 0;
+    for (const attribute of attributes) {
+      buffered = buffered && !!attribute.bufferBinding;
+      separate = separate || attribute.bufferBinding !== binding || attribute.stride !== stride;
+      bytes += attribute.size * GL.byteSizeByType[attribute.type - GL.byteSizeByTypeRoot];
+    }
+    // Preserve the SDK's ordinary single-buffer interleaved fast path.
+    GLImmediate.touchhleBufferedAttributes = buffered && (separate || stride < bytes);
+    if (GLImmediate.touchhleBufferedAttributes) {
+      GLImmediate.modifiedClientAttributes = false;
+      // These fields only carry the vertex count through flush. Each shader
+      // attribute receives its actual stride in bufferedPointer above.
+      GLImmediate.stride = 4;
+      GLImmediate.vertexCounter = count;
+      GLImmediate.vertexPointer = 0;
+      GLImmediate.touchhleSavedArrayBufferBinding = GLctx.currentArrayBufferBinding;
+      // The SDK uses the current binding to decide whether to upload client
+      // memory. A later unbind must not change an earlier gl*Pointer binding.
+      GLctx.currentArrayBufferBinding = attributes[0].bufferBinding;
+      return;
+    }
     try {
-      return prepare.apply(this, args);
+      return prepare.call(this, count, beginEnd);
     } finally {
       // The planar-array conversion rewrites pointer to its scratch buffer.
       // Rendering uses offset/vertexPointer, but later glGetPointerv and EAGL
       // state backups must still see the pointer supplied by the application.
       for (const attribute of GLImmediate.clientAttributes) {
         attribute.pointer = attribute.declaredPointer;
+      }
+    }
+  };
+  const flush = GLImmediate.flush;
+  GLImmediate.flush = function (...args) {
+    try { return flush.apply(this, args); }
+    finally {
+      if (GLImmediate.touchhleBufferedAttributes) {
+        GLctx.currentArrayBufferBinding = GLImmediate.touchhleSavedArrayBufferBinding;
+        GLctx.bindBuffer(GLctx.ARRAY_BUFFER, GL.buffers[GLctx.currentArrayBufferBinding] || null);
+        // Invalidate the synthetic count/stride layout before a later draw
+        // returns to the SDK path without issuing new gl*Pointer calls.
+        GLImmediate.modifiedClientAttributes = true;
+        GLImmediate.touchhleBufferedAttributes = false;
       }
     }
   };

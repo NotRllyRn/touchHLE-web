@@ -1,6 +1,6 @@
 --- a/qemu/tcg/tci.c
 +++ b/qemu/tcg/tci.c
-@@ -478,18 +478,71 @@
+@@ -478,18 +478,73 @@
  uintptr_t tci_tb_ptr;
  #endif
  
@@ -58,7 +58,9 @@
 +             exitCheck: {callee: HEAPU32[(layout >> 2) + 5], offset: HEAP32[(layout >> 2) + 6]},
 +             floatMath: {callees: Array.from(HEAPU32.subarray((layout >> 2) + 7, (layout >> 2) + 11)),
 +              rounding: HEAPU32[(layout >> 2) + 11], flags: HEAPU32[(layout >> 2) + 12],
-+              nearest: HEAPU32[(layout >> 2) + 13], inexact: HEAPU32[(layout >> 2) + 14]}, unaligned: HEAPU32[(layout >> 2) + 15], pageMap: HEAPU32[(layout >> 2) + 16], floatUnary: Array.from(HEAPU32.subarray((layout >> 2) + 17, (layout >> 2) + 19))});
++              nearest: HEAPU32[(layout >> 2) + 13], inexact: HEAPU32[(layout >> 2) + 14]}, unaligned: HEAPU32[(layout >> 2) + 15], pageMap: HEAPU32[(layout >> 2) + 16], floatUnary: Array.from(HEAPU32.subarray((layout >> 2) + 17, (layout >> 2) + 19)),
++             floatNarrow: HEAPU32[(layout >> 2) + 19],
++             floatToInt: HEAPU32[(layout >> 2) + 20]});
 +    }
 +    return !!Module['tciJit'];
 +});
@@ -83,7 +85,16 @@
      for (;;) {
          TCGOpcode opc = tb_ptr[0];
  #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-@@ -550,6 +603,7 @@
+@@ -511,7 +566,7 @@
+ #endif
+         TCGMemOpIdx oi;
+ 
+-#if defined(GETPC)
++#if defined(CONFIG_TCG_INTERPRETER)
+         tci_tb_ptr = (uintptr_t)tb_ptr;
+ #endif
+ 
+@@ -550,6 +605,7 @@
              label = tci_read_label(&tb_ptr);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr = (uint8_t *)label;
@@ -91,7 +102,7 @@
              continue;
          case INDEX_op_setcond_i32:
              t0 = *tb_ptr++;
-@@ -752,7 +806,8 @@
+@@ -752,7 +808,8 @@
              if (tci_compare32(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -101,7 +112,7 @@
              }
              break;
  #if TCG_TARGET_REG_BITS == 32
-@@ -778,7 +833,8 @@
+@@ -778,7 +835,8 @@
              if (tci_compare64(tmp64, v64, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -111,7 +122,7 @@
              }
              break;
          case INDEX_op_mulu2_i32:
-@@ -1026,7 +1082,8 @@
+@@ -1026,7 +1084,8 @@
              if (tci_compare64(t0, t1, condition)) {
                  tci_assert(tb_ptr == old_code_ptr + op_size);
                  tb_ptr = (uint8_t *)label;
@@ -121,7 +132,7 @@
              }
              break;
  #if TCG_TARGET_HAS_ext8u_i64
-@@ -1123,7 +1180,7 @@
+@@ -1123,7 +1182,7 @@
              tb_ptr += sizeof(int32_t);
              tci_assert(tb_ptr == old_code_ptr + op_size);
              tb_ptr += (int32_t)t0;
@@ -130,7 +141,7 @@
          case INDEX_op_qemu_ld_i32:
              t0 = *tb_ptr++;
              taddr = tci_read_ulong(regs, &tb_ptr);
-@@ -1273,7 +1330,80 @@
+@@ -1273,7 +1332,82 @@
              break;
          }
          tci_assert(tb_ptr == old_code_ptr + op_size);
@@ -151,7 +162,7 @@
 +    uint32_t a3, uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8,
 +    uint32_t a9, uint32_t a10, uint32_t a11, uint32_t a12)
 +{
-+#if defined(GETPC)
++#if defined(CONFIG_TCG_INTERPRETER)
 +    tci_tb_ptr = pc;
 +#endif
 +    return function(a0, a1, a2, a3, a5, a6, a7, a8, a9, a10, a11, a12);
@@ -182,7 +193,9 @@
 +            (uintptr_t)glue(adapter_helper_, vfp_adds), (uintptr_t)glue(adapter_helper_, vfp_muls),
 +            (uintptr_t)glue(adapter_helper_, vfp_subs), (uintptr_t)glue(adapter_helper_, vfp_divs),
 +            offsetof(float_status, float_rounding_mode), offsetof(float_status, float_exception_flags),
-+            float_round_nearest_even, float_flag_inexact, MO_UNALN, offsetof(struct uc_struct, touchhle_read_pages), (uintptr_t)glue(adapter_helper_, vfp_negs), (uintptr_t)glue(adapter_helper_, vfp_abss)
++            float_round_nearest_even, float_flag_inexact, MO_UNALN, offsetof(struct uc_struct, touchhle_read_pages), (uintptr_t)glue(adapter_helper_, vfp_negs), (uintptr_t)glue(adapter_helper_, vfp_abss),
++            (uintptr_t)glue(adapter_helper_, vfp_fcvtsd),
++            (uintptr_t)glue(adapter_helper_, vfp_tosizs)
 +        };
 +        enabled = touchhle_tci_init((uintptr_t)&touchhle_compiled_executions,
 +            (uintptr_t)touchhle_tci_step, (uintptr_t)read_layout, (uintptr_t)touchhle_tci_call);

@@ -24,6 +24,9 @@ use crate::objc::{
 };
 use crate::Environment;
 
+#[cfg(target_os = "emscripten")]
+pub mod web_input;
+
 type UIKeyboardAppearance = NSInteger;
 type UIKeyboardType = NSInteger;
 pub type UIReturnKeyType = NSInteger;
@@ -109,6 +112,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
+    #[cfg(target_os = "emscripten")]
+    web_input::teardown(env, this);
     let UITextFieldHostObject {
         text_label,
         ..
@@ -227,6 +232,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)becomeFirstResponder {
+    #[cfg(target_os = "emscripten")]
+    { web_input::focus(env, this, true) }
+    #[cfg(not(target_os = "emscripten"))]
+    {
     log_dbg!("becomeFirstResponder");
 
     if env.objc.borrow::<UITextFieldHostObject>(this).editing {
@@ -274,9 +283,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     true
+
+    }
 }
 
 - (bool)resignFirstResponder {
+    #[cfg(target_os = "emscripten")]
+    { web_input::focus(env, this, false) }
+    #[cfg(not(target_os = "emscripten"))]
+    {
     log_dbg!("resignFirstResponder");
 
     if !env.objc.borrow::<UITextFieldHostObject>(this).editing {
@@ -311,6 +326,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     true
+
+    }
 }
 
 @end

@@ -1,0 +1,702 @@
+--- a/qemu/include/tcg/tcg.h
++++ b/qemu/include/tcg/tcg.h
+@@ -630,6 +630,8 @@
+ 
+ #ifdef TCG_OPAQUE_PTR_CAPTURE
+ /* Byte offset is TB-relative and points at the four immediate bytes. */
++bool touchhle_tb_static_helper_id(uint32_t value, uint32_t *id);
++bool touchhle_tb_static_helper_value(uint32_t id, uint32_t *value);
+ typedef struct TCGPtrReloc {
+     uint32_t offset;
+     uint32_t recipe;
+--- a/qemu/tcg/tcg.c
++++ b/qemu/tcg/tcg.c
+@@ -659,6 +659,25 @@
+ static const TCGHelperInfo all_helpers[] = {
+ #include "exec/helper-tcg.h"
+ };
++
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++/* IDs are only valid in this exact module instance: all_helpers contains the
++ * actual TCI adapter pointers, never helper-proto's incompatible signatures. */
++bool touchhle_tb_static_helper_id(uint32_t value, uint32_t *id)
++{
++    unsigned i;
++    for (i = 0; i < ARRAY_SIZE(all_helpers); ++i) {
++        if ((uintptr_t)all_helpers[i].func == value) { *id = i; return true; }
++    }
++    return false;
++}
++bool touchhle_tb_static_helper_value(uint32_t id, uint32_t *value)
++{
++    if (id >= ARRAY_SIZE(all_helpers)) { return false; }
++    *value = (uintptr_t)all_helpers[id].func;
++    return true;
++}
++#endif
+ 
+ static const TCGOpDef tcg_op_defs_org[] = {
+ #define DEF(s, oargs, iargs, cargs, flags) \
+--- a/qemu/accel/tcg/translate-all.c
++++ b/qemu/accel/tcg/translate-all.c
+@@ -1693,6 +1693,10 @@
+     return tb;
+ }
+ 
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++#include "touchhle-tb-archive.inc.c"
++#endif
++
+ /* Called with mmap_lock held for user mode emulation.  */
+ TranslationBlock *tb_gen_code(CPUState *cpu,
+                               target_ulong pc, target_ulong cs_base,
+@@ -1708,6 +1712,10 @@
+     target_ulong virt_page2;
+     tcg_insn_unit *gen_code_buf;
+     int gen_code_size, search_size, max_insns;
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++    THKey archive_key;
++    bool archive_eligible;
++#endif
+ 
+     assert_memory_lock();
+ #ifdef HAVE_PTHREAD_JIT_PROTECT
+@@ -1755,6 +1763,16 @@
+     tb->trace_vcpu_dstate = *cpu->trace_dstate;
+     tcg_ctx->tb_cflags = cflags;
+  tb_overflow:
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++    archive_eligible = max_insns == MIN(CF_COUNT_MASK, TCG_MAX_INSNS) &&
++                       th_key(cpu, tb, phys_pc, &archive_key);
++    tcg_ctx->ptr_capture_enabled = archive_eligible;
++    if (archive_eligible && th_restore(cpu, tb, &archive_key,
++                                       &gen_code_size, &search_size)) {
++        goto archive_publish;
++    }
++    ++th_stats[3];
++#endif
+ 
+     tcg_func_start(tcg_ctx);
+ 
+@@ -1814,6 +1832,12 @@
+     if (unlikely(search_size < 0)) {
+         goto buffer_overflow;
+     }
++#ifdef TOUCHHLE_TB_RESTORE_PROTOTYPE
++    if (archive_eligible) {
++        th_capture(cpu, tb, &archive_key, gen_code_size, search_size);
++    }
++ archive_publish:
++#endif
+     tb->tc.size = gen_code_size;
+ #ifdef __EMSCRIPTEN__
+ #if !defined(TARGET_ARM) || defined(TARGET_AARCH64) || TARGET_LONG_BITS != 32 || TARGET_INSN_START_WORDS != 3
+--- /dev/null
++++ b/qemu/accel/tcg/touchhle-tb-archive.inc.c
+@@ -0,0 +1,586 @@
++/* Isolated exact-runtime ARM32 TCI archive prototype.
++ * Same LGPL-2.1-or-later terms as translate-all.c. No serialized ABI.
++ */
++#if !defined(TCG_OPAQUE_PTR_CAPTURE)
++#error TB restore requires the explicit opaque pointer prototype
++#endif
++
++#include "tcg/touchhle-tb-archive.h"
++
++#define TH_ARCHIVE_SLOTS 16
++#define TH_CODE_MAX 16384
++#define TH_SEARCH_MAX 8192
++#define TH_ENGINE_MAX 8
++
++typedef struct THKey {
++    uint64_t contract, features, exit;
++    uint32_t pc, cs_base, flags, cflags, trace, model, mode;
++    bool budget_active, budget_adapter, no_exit_request;
++} THKey;
++typedef struct THEntry {
++    THKey key;
++    uint64_t seal;
++    uint32_t code_size, search_size, size, icount, ptr_count;
++    uint16_t reset[2];
++    uint32_t jump[2];
++    bool no_exit_after;
++    TCGPtrReloc ptrs[TCG_PTR_RELOC_MAX];
++    uint8_t guest[4096], code[TH_CODE_MAX], search[TH_SEARCH_MAX];
++} THEntry;
++/* Accidental-corruption seal, not an untrusted-file authentication scheme. */
++static uint64_t th_seal(const THEntry *e)
++{
++    const uint8_t *p = (const uint8_t *)e;
++    uint64_t h = UINT64_C(14695981039346656037);
++    unsigned i;
++    for (i = 0; i < sizeof(*e); ++i) {
++        uint8_t b = (i >= offsetof(THEntry, seal) &&
++                     i < offsetof(THEntry, seal) + sizeof(e->seal))
++                        ? 0
++                        : p[i];
++        h = (h ^ b) * UINT64_C(1099511628211);
++    }
++    return h;
++}
++static THEntry th_entries[TH_ARCHIVE_SLOTS], th_work;
++static unsigned th_used, th_next;
++static struct {
++    struct uc_struct *uc;
++    uint64_t contract;
++} th_engines[TH_ENGINE_MAX];
++static uint64_t
++    th_stats[5]; /* captures, restores, misses, decodes, rejections */
++
++/* Caller promises immutable identical CPU model/features/configuration for a
++ * nonzero contract. Bind only after engine configuration, unbind before close.
++ * Single emulation thread, no reentrant compilation. Does not enable adapter.
++ */
++int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract)
++{
++    unsigned i;
++    for (i = 0; i < TH_ENGINE_MAX; ++i) {
++        if (th_engines[i].uc == uc) {
++            th_engines[i].contract = contract;
++            if (!contract) {
++                th_engines[i].uc = NULL;
++            }
++            return 1;
++        }
++    }
++    if (!contract) {
++        return 1;
++    }
++    for (i = 0; i < TH_ENGINE_MAX; ++i) {
++        if (!th_engines[i].uc) {
++            th_engines[i].uc = uc;
++            th_engines[i].contract = contract;
++            return 1;
++        }
++    }
++    return 0;
++}
++void touchhle_tb_archive_clear(void)
++{
++    memset(th_entries, 0, sizeof(th_entries));
++    memset(th_stats, 0, sizeof(th_stats));
++    th_used = th_next = 0;
++}
++uint64_t touchhle_tb_archive_stat(unsigned n)
++{
++    return n < ARRAY_SIZE(th_stats) ? th_stats[n] : 0;
++}
++/* Test seam: corrupt bounded archive bytes, never live TBs. */
++int touchhle_tb_archive_mutate(unsigned slot, unsigned section, unsigned offset,
++                               uint8_t xor_mask)
++{
++    THEntry *e;
++    uint8_t *p;
++    unsigned n;
++    if (slot >= th_used) {
++        return 0;
++    }
++    e = &th_entries[slot];
++    switch (section) {
++    case 0:
++        p = e->guest;
++        n = e->size;
++        break;
++    case 1:
++        p = e->code;
++        n = e->code_size;
++        break;
++    case 2:
++        p = e->search;
++        n = e->search_size;
++        break;
++    default:
++        return 0;
++    }
++    if (offset >= n) {
++        return 0;
++    }
++    p[offset] ^= xor_mask;
++    return 1;
++}
++static uint32_t th_u32(const uint8_t *p)
++{
++    uint32_t x;
++    memcpy(&x, p, 4);
++    return x;
++}
++static void th_put32(uint8_t *p, uint32_t x) { memcpy(p, &x, 4); }
++static bool th_key(CPUState *cpu, TranslationBlock *tb, tb_page_addr_t phys,
++                   THKey *k)
++{
++    struct uc_struct *uc = cpu->uc;
++    CPUARMState *env = cpu->env_ptr;
++    unsigned i;
++    memset(k, 0, sizeof(*k));
++    for (i = 0; i < TH_ENGINE_MAX; ++i) {
++        if (th_engines[i].uc == uc) {
++            k->contract = th_engines[i].contract;
++        }
++    }
++    if (!k->contract || !uc->touchhle_direct_memory || phys != tb->pc ||
++        !uc->touchhle_read_pages[tb->pc >> 12] || tb->cflags != 0 ||
++        cpu->singlestep_enabled || !QTAILQ_EMPTY(&cpu->breakpoints) ||
++        !QTAILQ_EMPTY(&cpu->watchpoints) || uc->count_hook || uc->use_exits ||
++        uc->nested_level != 1 || uc->invalid_error ||
++        FIELD_EX32(tb->flags, TBFLAG_AM32, THUMB) ||
++        FIELD_EX32(tb->flags, TBFLAG_AM32, CONDEXEC) ||
++        FIELD_EX32(tb->flags, TBFLAG_ANY, SS_ACTIVE) ||
++        FIELD_EX32(tb->flags, TBFLAG_ANY, PSTATE_SS)) {
++        return false;
++    }
++    /* Deliberately reject every hook, including valid-memory and inline hooks.
++     */
++    for (i = 0; i < UC_HOOK_MAX; ++i) {
++        if (uc->hook[i].head) {
++            return false;
++        }
++    }
++    k->features = env->features;
++    k->model = uc->cpu_model;
++    k->mode = uc->mode;
++    k->exit = uc->exits[0];
++    k->pc = tb->pc;
++    k->cs_base = tb->cs_base;
++    k->flags = tb->flags;
++    k->cflags = tb->cflags;
++    k->trace = tb->trace_vcpu_dstate;
++    k->budget_active = uc->touchhle_budget_active;
++    k->budget_adapter = uc->touchhle_budget_adapter;
++    k->no_exit_request = uc->no_exit_request;
++    return true;
++}
++static uint32_t th_ptr(CPUState *cpu, unsigned recipe)
++{
++    switch (recipe) {
++    case TCG_PTR_CURRENT_UC:
++        return (uintptr_t)cpu->uc;
++    case TCG_PTR_CURRENT_CPU_ICOUNT_DECR_U32:
++        return (uintptr_t)&cpu_neg(cpu)->icount_decr.u32;
++    case TCG_PTR_CURRENT_UC_BUDGET:
++        return (uintptr_t)&cpu->uc->touchhle_budget;
++    default:
++        return 0;
++    }
++}
++/* Bounded signed LEB32; reject overflow, truncation, noncanonical encodings. */
++static bool th_sleb(const uint8_t **pp, const uint8_t *end, int32_t *out)
++{
++    const uint8_t *p = *pp;
++    int64_t x = 0;
++    unsigned shift = 0, n = 0;
++    uint8_t b, prev = 0;
++    do {
++        if (p == end || n == 5) {
++            return false;
++        }
++        b = *p++;
++        x |= (int64_t)(b & 127) << shift;
++        shift += 7;
++        ++n;
++        if (!(b & 128)) {
++            break;
++        }
++        prev = b;
++    } while (true);
++    if (b & 64) {
++        x -= (int64_t)1 << shift;
++    }
++    if (x < INT32_MIN || x > INT32_MAX ||
++        (n > 1 && ((b == 0 && !(prev & 64)) || (b == 127 && (prev & 64))))) {
++        return false;
++    }
++    *pp = p;
++    *out = x;
++    return true;
++}
++static bool th_search(const THEntry *e)
++{
++    const uint8_t *p = e->search, *end;
++    uint32_t data[3] = {e->key.pc, 0, 0};
++    int64_t off = 0;
++    unsigned i, j;
++    int32_t d;
++    if (!e->size || e->size > 4096 || (e->size & 3) || (e->key.pc & 3) ||
++        (e->key.pc & 4095) + e->size > 4096 || !e->icount ||
++        e->icount > TCG_MAX_INSNS || !e->code_size ||
++        e->code_size > TH_CODE_MAX || !e->search_size ||
++        e->search_size > TH_SEARCH_MAX || e->ptr_count > TCG_PTR_RELOC_MAX) {
++        return false;
++    }
++    end = p + e->search_size;
++    for (i = 0; i < e->icount; ++i) {
++        for (j = 0; j < 3; ++j) {
++            if (!th_sleb(&p, end, &d)) {
++                return false;
++            }
++            data[j] += (uint32_t)d;
++        }
++        /* ARM state only: no initial or internal IT state. */
++        if (data[0] < e->key.pc ||
++            (uint64_t)data[0] >= (uint64_t)e->key.pc + e->size ||
++            (data[0] & 3) || data[1] != 0 || !th_sleb(&p, end, &d) || d < 0) {
++            return false;
++        }
++        off += d;
++        if (off > e->code_size) {
++            return false;
++        }
++    }
++    return p == end;
++}
++/* Explicitly supported numeric-only TCI layouts. Unknown opcodes fail closed.
++ * RI values are integers, never classified by their numeric address range. */
++static bool th_reg(const uint8_t *p, unsigned *pos, unsigned end)
++{
++    return *pos < end && p[(*pos)++] < 16;
++}
++static bool th_ri(const uint8_t *p, unsigned *pos, unsigned end)
++{
++    if (*pos >= end) {
++        return false;
++    }
++    if (p[*pos] != TCG_CONST) {
++        return th_reg(p, pos, end);
++    }
++    ++*pos;
++    if (end - *pos < 4) {
++        return false;
++    }
++    *pos += 4;
++    return true;
++}
++/* capture=true: live -> canonical. false: canonical -> current live addresses.
++ * Only scratch is changed until ALL bounds/relocations/search checks succeed.
++ */
++static bool th_code(THEntry *e, CPUState *cpu, TranslationBlock *tb,
++                    bool capture)
++{
++    uint8_t starts[TH_CODE_MAX] = {0};
++    uint32_t labels[TH_CODE_MAX / 6];
++    unsigned label_count = 0, pos = 0, ptr_seen = 0, jump_seen = 0, i;
++    uintptr_t base = (uintptr_t)tb->tc.ptr;
++    if ((base & 3) || !th_search(e)) {
++        return false;
++    }
++    while (pos < e->code_size) {
++        unsigned start = pos, op = e->code[pos++], len, end, at;
++        uint32_t v, canonical;
++        uint64_t x;
++        bool ok = true;
++        if (pos == e->code_size) {
++            return false;
++        }
++        len = e->code[pos++];
++        end = start + len;
++        if (len < 2 || end > e->code_size) {
++            return false;
++        }
++        starts[start] = 1;
++        switch (op) {
++        case INDEX_op_mov_i32:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end);
++            break;
++        case INDEX_op_movi_i32:
++            ok = th_reg(e->code, &pos, end) && end - pos == 4;
++            if (!ok) {
++                break;
++            }
++            for (i = 0; i < e->ptr_count; ++i) {
++                if (e->ptrs[i].offset == pos) {
++                    uint32_t recipe = e->ptrs[i].recipe;
++                    if (!th_ptr(cpu, recipe) ||
++                        th_u32(e->code + pos) !=
++                            (capture ? th_ptr(cpu, recipe) : recipe)) {
++                        return false;
++                    }
++                    th_put32(e->code + pos,
++                             capture ? recipe : th_ptr(cpu, recipe));
++                    ++ptr_seen;
++                }
++            }
++            pos += 4;
++            break;
++        case INDEX_op_ld_i32:
++        case INDEX_op_ld8u_i32:
++        case INDEX_op_ld8s_i32:
++        case INDEX_op_ld16u_i32:
++        case INDEX_op_ld16s_i32:
++        case INDEX_op_st_i32:
++        case INDEX_op_st8_i32:
++        case INDEX_op_st16_i32:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
++                 end - pos == 4;
++            pos += 4;
++            break;
++        case INDEX_op_add_i32:
++        case INDEX_op_sub_i32:
++        case INDEX_op_mul_i32:
++        case INDEX_op_and_i32:
++        case INDEX_op_or_i32:
++        case INDEX_op_xor_i32:
++        case INDEX_op_shl_i32:
++        case INDEX_op_shr_i32:
++        case INDEX_op_sar_i32:
++            ok = th_reg(e->code, &pos, end) && th_ri(e->code, &pos, end) &&
++                 th_ri(e->code, &pos, end);
++            break;
++        case INDEX_op_brcond2_i32:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
++                 th_ri(e->code, &pos, end) && th_ri(e->code, &pos, end);
++            if (!ok || pos == end) {
++                return false;
++            }
++            ++pos;
++            goto branch_label;
++        case INDEX_op_brcond_i32:
++            ok = th_reg(e->code, &pos, end) && th_ri(e->code, &pos, end);
++            if (!ok || pos == end) {
++                return false;
++            }
++            ++pos; /* TCGCond is from this exact encoder. */
++            /* fall through */
++        case INDEX_op_br:
++        branch_label:
++            if (end - pos != 4 || label_count == ARRAY_SIZE(labels)) {
++                return false;
++            }
++            v = th_u32(e->code + pos);
++            canonical = capture ? v - base : v;
++            if (canonical >= e->code_size) {
++                return false;
++            }
++            labels[label_count++] = canonical;
++            th_put32(e->code + pos, capture ? canonical : base + canonical);
++            pos += 4;
++            break;
++        case INDEX_op_exit_tb:
++            if (end - pos != 8) {
++                return false;
++            }
++            memcpy(&x, e->code + pos, 8);
++            if (capture) {
++                if (x == 0) {
++                    canonical = 0;
++                } else if ((x & ~(uint64_t)3) == (uintptr_t)tb &&
++                           (x & 3) != 2) {
++                    canonical = 4 + (x & 3);
++                } else {
++                    return false;
++                }
++                x = canonical;
++            } else {
++                if (x != 0 && x != 4 && x != 5 && x != 7) {
++                    return false;
++                }
++                x = x ? (uintptr_t)tb + (x - 4) : 0;
++            }
++            memcpy(e->code + pos, &x, 8);
++            pos += 8;
++            break;
++        case INDEX_op_call:
++            if (end - pos != 5 || e->code[pos++] != TCG_CONST) {
++                return false;
++            }
++            v = th_u32(e->code + pos);
++            if (capture) {
++                if (!touchhle_tb_static_helper_id(v, &canonical)) {
++                    return false;
++                }
++                th_put32(e->code + pos, canonical);
++            } else {
++                if (!touchhle_tb_static_helper_value(v, &canonical)) {
++                    return false;
++                }
++                th_put32(e->code + pos, canonical);
++            }
++            pos += 4;
++            break;
++        case INDEX_op_qemu_ld_i32:
++        case INDEX_op_qemu_st_i32:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
++                 end - pos == 4;
++            pos += 4; /* numeric MemOpIdx */
++            break;
++        case INDEX_op_qemu_ld_i64:
++        case INDEX_op_qemu_st_i64:
++            ok = th_reg(e->code, &pos, end) && th_reg(e->code, &pos, end) &&
++                 th_reg(e->code, &pos, end) && end - pos == 4;
++            pos += 4;
++            break;
++        case INDEX_op_mb:
++            break;
++        case INDEX_op_goto_tb:
++            /* Only existing metadata identifies patch sites; never scan values.
++             */
++            at = ROUND_UP(base + pos, 4) - base;
++            if (end != at + 4) {
++                return false;
++            }
++            for (i = 0; i < 2; ++i) {
++                if (e->reset[i] == end && e->jump[i] == at &&
++                    e->reset[i] != TB_JMP_RESET_OFFSET_INVALID) {
++                    break;
++                }
++            }
++            if (i == 2 || (jump_seen & (1u << i))) {
++                return false;
++            }
++            jump_seen |= 1u << i;
++            memset(e->code + pos, 0,
++                   end - pos); /* shared reset path repatches */
++            pos = end;
++            break;
++        default:
++            return false;
++        }
++        if (!ok || pos != end) {
++            return false;
++        }
++    }
++    for (i = 0; i < label_count; ++i) {
++        if (!starts[labels[i]]) {
++            return false;
++        }
++    }
++    for (i = 0; i < 2; ++i) {
++        if (e->reset[i] == TB_JMP_RESET_OFFSET_INVALID && e->jump[i]) {
++            return false;
++        }
++        if ((e->reset[i] != TB_JMP_RESET_OFFSET_INVALID) !=
++            !!(jump_seen & (1u << i))) {
++            return false;
++        }
++    }
++    for (i = 0; i < e->ptr_count; ++i) {
++        unsigned j;
++        for (j = 0; j < i; ++j) {
++            if (e->ptrs[i].offset == e->ptrs[j].offset) {
++                return false;
++            }
++        }
++    }
++    return ptr_seen == e->ptr_count;
++}
++static bool th_restore(CPUState *cpu, TranslationBlock *tb, const THKey *key,
++                       int *code_size, int *search_size)
++{
++    TCGContext *s = cpu->uc->tcg_ctx;
++    unsigned i;
++    for (i = 0; i < th_used; ++i) {
++        THEntry *e = &th_entries[i];
++        if (memcmp(&e->key, key, sizeof(*key))) {
++            continue;
++        }
++        th_work = *e;
++        if (e->seal != th_seal(e) || !th_search(&th_work) ||
++            memcmp(e->guest,
++                   cpu->uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095),
++                   e->size) ||
++            (uintptr_t)s->code_gen_highwater < (uintptr_t)tb->tc.ptr ||
++            e->code_size + e->search_size >
++                (uintptr_t)s->code_gen_highwater - (uintptr_t)tb->tc.ptr ||
++            !th_code(&th_work, cpu, tb, false)) {
++            ++th_stats[4];
++            continue;
++        }
++        memcpy(tb->tc.ptr, th_work.code, e->code_size);
++        memcpy((uint8_t *)tb->tc.ptr + e->code_size, e->search, e->search_size);
++        tb->size = e->size;
++        tb->icount = e->icount;
++        for (unsigned j = 0; j < 2; ++j) {
++            tb->jmp_reset_offset[j] = e->reset[j];
++            tb->jmp_target_arg[j] = e->jump[j];
++        }
++        cpu->uc->no_exit_request = e->no_exit_after;
++        cpu->uc->touchhle_code_pages[tb->pc >> 15] |= 1 << ((tb->pc >> 12) & 7);
++        *code_size = e->code_size;
++        *search_size = e->search_size;
++        ++th_stats[1];
++        return true;
++    }
++    ++th_stats[2];
++    return false;
++}
++static void th_capture(CPUState *cpu, TranslationBlock *tb, const THKey *key,
++                       int code_size, int search_size)
++{
++    TCGContext *s = cpu->uc->tcg_ctx;
++    THEntry *e = &th_work;
++    unsigned i;
++    if (cpu->uc->invalid_error || s->ptr_capture_rejected || code_size <= 0 ||
++        code_size > TH_CODE_MAX || search_size <= 0 ||
++        search_size > TH_SEARCH_MAX || !tb->size || tb->size > 4096 ||
++        (tb->pc & 4095) + tb->size > 4096) {
++        ++th_stats[4];
++        return;
++    }
++    memset(e, 0, sizeof(*e));
++    e->key = *key;
++    e->size = tb->size;
++    e->icount = tb->icount;
++    e->code_size = code_size;
++    e->search_size = search_size;
++    e->ptr_count = s->ptr_reloc_count;
++    if (e->ptr_count > TCG_PTR_RELOC_MAX) {
++        ++th_stats[4];
++        return;
++    }
++    memcpy(e->ptrs, s->ptr_relocs, e->ptr_count * sizeof(e->ptrs[0]));
++    e->no_exit_after = cpu->uc->no_exit_request;
++    for (i = 0; i < 2; ++i) {
++        e->reset[i] = tb->jmp_reset_offset[i];
++        /* No copied addresses when this jump is absent. */
++        e->jump[i] = e->reset[i] == TB_JMP_RESET_OFFSET_INVALID
++                         ? 0
++                         : tb->jmp_target_arg[i];
++    }
++    memcpy(e->code, tb->tc.ptr, code_size);
++    memcpy(e->search, (uint8_t *)tb->tc.ptr + code_size, search_size);
++    memcpy(e->guest,
++           cpu->uc->touchhle_read_pages[tb->pc >> 12] + (tb->pc & 4095),
++           tb->size);
++    if (!th_code(e, cpu, tb, true)) {
++        ++th_stats[4];
++        return;
++    }
++    /* Replace same-key record so a code write can establish a new fixture. */
++    for (i = 0; i < th_used; ++i) {
++        if (!memcmp(&th_entries[i].key, key, sizeof(*key))) {
++            break;
++        }
++    }
++    if (i == th_used) {
++        i = th_next;
++        th_next = (th_next + 1) % TH_ARCHIVE_SLOTS;
++        if (th_used < TH_ARCHIVE_SLOTS) {
++            ++th_used;
++        }
++    }
++    e->seal = th_seal(e);
++    th_entries[i] = *e;
++    ++th_stats[0];
++}
+--- /dev/null
++++ b/qemu/include/tcg/touchhle-tb-archive.h
+@@ -0,0 +1,17 @@
++/* Exact-runtime ARM32 TCI prototype. LGPL-2.1-or-later; no stable ABI. */
++#ifndef TOUCHHLE_TB_ARCHIVE_H
++#define TOUCHHLE_TB_ARCHIVE_H
++#include <stdint.h>
++struct uc_struct;
++/* Nonzero contract asserts identical immutable CPU model/configuration and
++ * fixed direct-memory adapter policy. Zero unbinds; mandatory before uc_close.
++ * Single-threaded, non-reentrant use, within ONE loaded module only. */
++int touchhle_tb_archive_bind(struct uc_struct *uc, uint64_t contract);
++void touchhle_tb_archive_clear(void);
++/* 0 captures, 1 restores, 2 eligible misses, 3 gen_intermediate_code calls,
++ * 4 capture/restore rejections. Counters are module-wide. */
++uint64_t touchhle_tb_archive_stat(unsigned counter);
++/* Test-only corruption seam: section 0 guest, 1 TCI, 2 search. */
++int touchhle_tb_archive_mutate(unsigned slot, unsigned section, unsigned offset,
++                               uint8_t xor_mask);
++#endif

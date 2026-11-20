@@ -37,6 +37,8 @@ struct UIViewControllerHostObject {
     /// of the nib by name, may be nil.
     /// `NSBundle*`
     bundle: id,
+    /// Lazily created, controller-owned navigation item. The getter borrows it.
+    navigation_item: id,
 }
 impl HostObject for UIViewControllerHostObject {}
 
@@ -77,7 +79,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
-    let &UIViewControllerHostObject { view, nib_name, bundle } = env.objc.borrow(this);
+    let (view, nib_name, bundle, navigation_item) = {
+        let state = env.objc.borrow_mut::<UIViewControllerHostObject>(this);
+        let navigation_item = std::mem::replace(&mut state.navigation_item, nil);
+        (state.view, state.nib_name, state.bundle, navigation_item)
+    };
 
     if view != nil {
         set_view_controller(env, view, nil);
@@ -85,8 +91,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, view);
     release(env, nib_name);
     release(env, bundle);
+    release(env, navigation_item);
 
     env.objc.dealloc_object(this, &mut env.mem);
+}
+
+- (id)navigationItem {
+    let item = env.objc.borrow::<UIViewControllerHostObject>(this).navigation_item;
+    if item != nil {
+        return item;
+    }
+    // Creating model state must not load the controller's view or invoke its
+    // appearance callbacks. Keep the alloc/init reference; this getter is +0.
+    let item: id = msg_class![env; UINavigationItem alloc];
+    let item: id = msg![env; item initWithTitle:nil];
+    env.objc.borrow_mut::<UIViewControllerHostObject>(this).navigation_item = item;
+    item
 }
 
 - (())loadView {

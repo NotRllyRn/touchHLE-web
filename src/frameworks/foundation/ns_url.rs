@@ -99,7 +99,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     // FIXME: this should parse the URL
+    #[cfg(not(target_os = "emscripten"))]
     assert!(!to_rust_string(env, url).starts_with("file:")); // TODO
+    #[cfg(target_os = "emscripten")]
+    if to_rust_string(env, url).to_ascii_lowercase().starts_with("file:") {
+        // This constructor cannot parse file URLs yet. Fail initialization rather
+        // than aborting the browser session before openURL can reject nil.
+        release(env, this);
+        return nil;
+    }
     let url: id = msg![env; url copy];
     *env.objc.borrow_mut(this) = NSURLHostObject::OtherURL { ns_string: url };
     this
@@ -146,6 +154,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         NSURLHostObject::FileURL { ns_string, .. } => ns_string,
         NSURLHostObject::OtherURL { ns_string } => {
             // TODO: full RFC 1808 resolution
+            // Browser openURL must be able to reject unsupported schemes without
+            // an assertion terminating the guest first. Native behavior is kept.
+            #[cfg(not(target_os = "emscripten"))]
             assert!(to_rust_string(env, ns_string).starts_with("http"));
             ns_string
         },

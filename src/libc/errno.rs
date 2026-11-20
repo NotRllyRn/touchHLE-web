@@ -39,6 +39,8 @@ pub const EOVERFLOW: i32 = 84;
 #[derive(Default)]
 pub struct State {
     errnos: std::collections::HashMap<crate::ThreadId, MutPtr<i32>>,
+    // Guest pointer only; canonical cells live for this State lifetime.
+    last_errno: Option<(crate::ThreadId, MutPtr<i32>)>,
     strings_cache: std::collections::HashMap<i32, ConstPtr<u8>>,
 }
 impl State {
@@ -47,10 +49,17 @@ impl State {
         mem: &mut crate::mem::Mem,
         thread: crate::ThreadId,
     ) -> MutPtr<i32> {
-        *self
+        if let Some((last_thread, ptr)) = self.last_errno {
+            if last_thread == thread {
+                return ptr;
+            }
+        }
+        let ptr = *self
             .errnos
             .entry(thread)
-            .or_insert_with(|| mem.alloc_and_write(0i32))
+            .or_insert_with(|| mem.alloc_and_write(0i32));
+        self.last_errno = Some((thread, ptr));
+        ptr
     }
 
     pub fn set_errno_for_thread(

@@ -44,7 +44,7 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
   '-sMAX_WEBGL_VERSION=2',
   '-sASSERTIONS=1',
   '-sEXIT_RUNTIME=1', '-sMODULARIZE=1', '-sEXPORT_NAME=createTouchHLE',
-  '-sEXPORTED_FUNCTIONS=["_touchhle_web_start","_touchhle_web_pointer","_touchhle_web_touch"]', '-sEXPORTED_RUNTIME_METHODS=["FS","ccall"]',
+  '-sEXPORTED_FUNCTIONS=["_touchhle_web_start","_touchhle_web_pointer","_touchhle_web_touch","_touchhle_web_text_lease","_touchhle_web_text_enqueue"]', '-sEXPORTED_RUNTIME_METHODS=["FS","ccall"]',
   '-sENVIRONMENT=web,worker,node', '-lopenal',
   '--preload-file', 'touchHLE_dylibs', '--preload-file', 'touchHLE_fonts',
   '--preload-file', 'touchHLE_default_options.txt',
@@ -52,4 +52,6 @@ execFileSync('em++', ['target/wasm32-unknown-emscripten/release/libtouchHLE.a',
 
 await copyFile(`${root}web/runtime-worker.js`, `${root}web/dist/runtime-worker.js`);
 
-for (const name of ['audio-proxy.js', 'audio.mjs', 'tci-jit.js', 'tci-precompile.mjs', 'package-identity.mjs']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);
+for (const name of ['guest-saves.js', 'save-session.mjs', 'external-open.js', 'text-input.js', 'external-links.mjs', 'save-transfer.mjs', 'preflight.mjs', 'audio-proxy.js', 'audio.mjs', 'tci-jit.js', 'tci-precompile.mjs', 'package-identity.mjs']) await copyFile(`${root}web/${name}`, `${root}web/dist/${name}`);
+
+// The IPA validator is produced by web/build.mjs; packaging fingerprints it.

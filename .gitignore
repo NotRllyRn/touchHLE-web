@@ -30,3 +30,7 @@ android/build
 # Default developer dump file
 
 DUMP.txt
+
+# Python development tools
+
+__pycache__/
